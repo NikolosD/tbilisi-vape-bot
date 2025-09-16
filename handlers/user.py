@@ -23,6 +23,7 @@ from button_filters import (
     is_contact_button, is_info_button, is_language_button
 )
 
+
 router = Router()
 
 # Состояния для FSM
@@ -85,13 +86,13 @@ async def show_orders(message: Message):
     
     if not orders:
         await message.answer(
-            "📋 <b>У вас пока нет заказов</b>\n\nСделайте первый заказ из каталога!",
+            _("orders.empty", user_id=user_id),
             parse_mode='HTML'
         )
         return
     
     await message.answer(
-        "📋 <b>Ваши заказы:</b>\n\nВыберите заказ для просмотра деталей:",
+        _("orders.title", user_id=user_id) + "\n\n" + _("orders.select_order", user_id=user_id),
         reply_markup=get_orders_keyboard(orders, user_id=user_id),
         parse_mode='HTML'
     )
@@ -217,7 +218,7 @@ async def show_product(callback: CallbackQuery):
     # Проверяем, есть ли товар в корзине
     user_id = callback.from_user.id
     cart_items = await db.get_cart(user_id)
-    in_cart = any(item[0] == product_id for item in cart_items)
+    in_cart = any(item.product_id == product_id for item in cart_items)
     
     product_text = f"""🛍 <b>{product[1]}</b>
 
@@ -282,8 +283,17 @@ async def add_to_cart(callback: CallbackQuery):
     
     await callback.answer(_("cart.item_added"))
     
+    # Получаем from_category из исходного callback_data если есть
+    original_data = callback.message.reply_markup.inline_keyboard
+    from_category = None
+    for row in original_data:
+        for button in row:
+            if button.callback_data and button.callback_data.startswith("category_"):
+                from_category = int(button.callback_data.split("_")[1])
+                break
+    
     # Обновляем кнопки
-    keyboard = get_product_card_keyboard(product_id, in_cart=True)
+    keyboard = get_product_card_keyboard(product_id, in_cart=True, from_category=from_category)
     await callback.message.edit_reply_markup(reply_markup=keyboard)
 
 @router.callback_query(F.data.startswith("cart_increase_"))
@@ -350,8 +360,17 @@ async def cart_remove(callback: CallbackQuery):
     if "cart" in callback.message.text:
         await update_cart_display(callback)
     else:
+        # Получаем from_category из исходного callback_data если есть
+        original_data = callback.message.reply_markup.inline_keyboard
+        from_category = None
+        for row in original_data:
+            for button in row:
+                if button.callback_data and button.callback_data.startswith("category_"):
+                    from_category = int(button.callback_data.split("_")[1])
+                    break
+        
         # Обновляем кнопки на странице товара
-        keyboard = get_product_card_keyboard(product_id, in_cart=False)
+        keyboard = get_product_card_keyboard(product_id, in_cart=False, from_category=from_category)
         await callback.message.edit_reply_markup(reply_markup=keyboard)
 
 async def update_cart_display(callback: CallbackQuery):
@@ -726,13 +745,13 @@ async def show_my_orders(callback: CallbackQuery):
     
     if not orders:
         await callback.message.edit_text(
-            "📋 <b>У вас пока нет заказов</b>\n\nСделайте первый заказ из каталога!",
+            _("orders.empty", user_id=user_id),
             parse_mode='HTML'
         )
         return
     
     await callback.message.edit_text(
-        "📋 <b>Ваши заказы:</b>\n\nВыберите заказ для просмотра деталей:",
+        _("orders.title", user_id=user_id) + "\n\n" + _("orders.select_order", user_id=user_id),
         reply_markup=get_orders_keyboard(orders, user_id=user_id),
         parse_mode='HTML'
     )
@@ -779,8 +798,8 @@ async def show_order_details(callback: CallbackQuery):
         await callback.answer("❌ Заказ не найден", show_alert=True)
         return
     
-    # Парсим продукты
-    products = json.loads(order[3])
+    # Используем свойство модели для получения продуктов
+    products = order.products_data
     
     status_text = {
         'waiting_payment': '⏳ Ожидает оплаты',
@@ -791,7 +810,7 @@ async def show_order_details(callback: CallbackQuery):
         'cancelled': '❌ Отменен'
     }
     
-    order_text = f"""📋 <b>Заказ #{order[1]}</b>
+    order_text = f"""📋 <b>Заказ #{order.order_number}</b>
 
 📦 <b>Товары:</b>
 """
@@ -799,21 +818,21 @@ async def show_order_details(callback: CallbackQuery):
     for product in products:
         order_text += f"• {product['name']} × {product['quantity']} = {product['price'] * product['quantity']}₾\n"
     
-    zone_info = DELIVERY_ZONES.get(order[5], {'name': 'Неизвестно'})
+    zone_info = DELIVERY_ZONES.get(order.delivery_zone, {'name': 'Неизвестно'})
     
     order_text += f"""
-🚚 <b>Доставка:</b> {zone_info['name']} - {order[6]}₾
-📍 <b>Адрес:</b> {order[8]}
-📱 <b>Телефон:</b> {order[7]}
-📅 <b>Дата:</b> {str(order[11])[:16]}
+🚚 <b>Доставка:</b> {zone_info['name']} - {order.delivery_price}₾
+📍 <b>Адрес:</b> {order.address}
+📱 <b>Телефон:</b> {order.phone}
+📅 <b>Дата:</b> {str(order.created_at)[:16]}
 
-💰 <b>Итого: {order[4]}₾</b>
+💰 <b>Итого: {order.total_price}₾</b>
 
-📊 <b>Статус:</b> {status_text.get(order[9], order[9])}"""
+📊 <b>Статус:</b> {status_text.get(order.status, order.status)}"""
     
     await callback.message.edit_text(
         order_text,
-        reply_markup=get_order_details_keyboard(order_id, order[8]),
+        reply_markup=get_order_details_keyboard(order_id, order.status),
         parse_mode='HTML'
     )
 

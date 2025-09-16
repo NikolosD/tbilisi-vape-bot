@@ -176,10 +176,11 @@ def get_orders_keyboard(orders, user_id=None):
     keyboard = []
     
     for order in orders:
-        order_id = order[0]
-        status = order[8]
-        created_at = order[10]
-        total = order[3]
+        # Теперь order - это объект модели Order
+        order_id = order.id  # внутренний ID для callback
+        order_number = order.order_number  # реальный номер заказа для отображения
+        status = order.status
+        total = order.total_price
         
         status_emoji = {
             'waiting_payment': '⏳',
@@ -201,7 +202,7 @@ def get_orders_keyboard(orders, user_id=None):
         
         keyboard.append([
             InlineKeyboardButton(
-                text=f"{status_emoji.get(status, '❓')} " + _("common.order_number", user_id=user_id, order_id=order_id, total=total),
+                text=f"{status_emoji.get(status, '❓')} " + _("common.order_number", user_id=user_id, order_id=order_number, total=total),
                 callback_data=f"order_{order_id}"
             )
         ])
@@ -283,19 +284,25 @@ def get_admin_orders_keyboard(orders):
     keyboard = []
     
     for order in orders:
-        order_id = order[0]
-        user_id = order[1]
-        status = order[8]
-        total = order[3]
+        # Теперь order - это объект модели Order
+        order_id = order.id  # внутренний ID для callback
+        order_number = order.order_number  # реальный номер заказа для отображения
+        user_id = order.user_id
+        status = order.status
+        total = order.total_price
         
         status_emoji = {
             'waiting_payment': '⏳',
-            'payment_check': '💰'
+            'payment_check': '💰',
+            'paid': '✅',
+            'shipping': '🚚',
+            'delivered': '✅',
+            'cancelled': '❌'
         }
         
         keyboard.append([
             InlineKeyboardButton(
-                text=f"{status_emoji.get(status, '❓')} #{order_id} - {total}₾ (ID: {user_id})",
+                text=f"{status_emoji.get(status, '❓')} Заказ #{order_number} - {total}₾ (ID: {user_id})",
                 callback_data=f"admin_order_{order_id}"
             )
         ])

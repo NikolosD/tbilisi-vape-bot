@@ -179,10 +179,11 @@ class Database:
                                    delivery_zone, delivery_price_float, phone, address)
         return result['order_number']  # Возвращаем order_number вместо id
     
-    async def get_order(self, order_id):
+    async def get_order(self, order_id) -> Optional[Order]:
         """Получение заказа по ID"""
-        query = "SELECT * FROM orders WHERE id = $1"
-        return await self.fetchone(query, order_id)
+        query = "SELECT id, order_number, user_id, products, total_price, delivery_zone, delivery_price, phone, address, status, payment_screenshot, created_at FROM orders WHERE id = $1"
+        row = await self.fetchone(query, order_id)
+        return Order(*row) if row else None
     
     async def get_order_by_number(self, order_number) -> Optional[Order]:
         """Получение заказа по номеру заказа"""
@@ -192,8 +193,9 @@ class Database:
     
     async def get_user_orders(self, user_id):
         """Получение заказов пользователя"""
-        query = "SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC"
-        return await self.fetchall(query, user_id)
+        query = "SELECT id, order_number, user_id, products, total_price, delivery_zone, delivery_price, phone, address, status, payment_screenshot, created_at FROM orders WHERE user_id = $1 ORDER BY created_at DESC"
+        rows = await self.fetchall(query, user_id)
+        return [Order(*row) for row in rows]
     
     async def update_order_status(self, order_id, status):
         """Обновление статуса заказа"""
@@ -217,24 +219,28 @@ class Database:
     
     async def get_pending_orders(self):
         """Получение заказов ожидающих обработки"""
-        query = "SELECT * FROM orders WHERE status IN ('waiting_payment', 'payment_check', 'paid', 'shipping') ORDER BY created_at"
-        return await self.fetchall(query)
+        query = "SELECT id, order_number, user_id, products, total_price, delivery_zone, delivery_price, phone, address, status, payment_screenshot, created_at FROM orders WHERE status IN ('waiting_payment', 'payment_check', 'paid', 'shipping') ORDER BY created_at"
+        rows = await self.fetchall(query)
+        return [Order(*row) for row in rows]
     
     async def get_all_orders(self, limit=50):
         """Получение всех заказов (для админа)"""
-        query = "SELECT * FROM orders ORDER BY created_at DESC LIMIT $1"
-        return await self.fetchall(query, limit)
+        query = "SELECT id, order_number, user_id, products, total_price, delivery_zone, delivery_price, phone, address, status, payment_screenshot, created_at FROM orders ORDER BY created_at DESC LIMIT $1"
+        rows = await self.fetchall(query, limit)
+        return [Order(*row) for row in rows]
     
     async def get_orders_by_status(self, status, limit=50):
         """Получение заказов по статусу"""
-        query = "SELECT * FROM orders WHERE status = $1 ORDER BY created_at DESC LIMIT $2"
-        return await self.fetchall(query, status, limit)
+        query = "SELECT id, order_number, user_id, products, total_price, delivery_zone, delivery_price, phone, address, status, payment_screenshot, created_at FROM orders WHERE status = $1 ORDER BY created_at DESC LIMIT $2"
+        rows = await self.fetchall(query, status, limit)
+        return [Order(*row) for row in rows]
     
     async def get_orders_by_multiple_statuses(self, statuses, limit=50):
         """Получение заказов по нескольким статусам"""
         placeholders = ', '.join([f'${i+1}' for i in range(len(statuses))])
-        query = f"SELECT * FROM orders WHERE status IN ({placeholders}) ORDER BY created_at DESC LIMIT ${len(statuses)+1}"
-        return await self.fetchall(query, *statuses, limit)
+        query = f"SELECT id, order_number, user_id, products, total_price, delivery_zone, delivery_price, phone, address, status, payment_screenshot, created_at FROM orders WHERE status IN ({placeholders}) ORDER BY created_at DESC LIMIT ${len(statuses)+1}"
+        rows = await self.fetchall(query, *statuses, limit)
+        return [Order(*row) for row in rows]
     
     async def get_new_orders(self, limit=50):
         """Получение новых заказов (ожидающих оплаты)"""

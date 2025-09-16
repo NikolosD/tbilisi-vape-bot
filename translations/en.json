@@ -36,12 +36,16 @@
     "back_to_menu": "🔙 Main menu",
     "item_removed": "✅ Item removed from cart",
     "item_added": "✅ Item added to cart",
-    "quantity_updated": "✅ Quantity updated"
+    "quantity_updated": "✅ Quantity updated",
+    "quantity_increased": "✅ Quantity increased to {quantity}",
+    "quantity_decreased": "✅ Quantity decreased to {quantity}",
+    "item_deleted": "✅ Item removed from cart"
   },
   
   "orders": {
     "title": "📋 <b>My Orders</b>",
     "empty": "📋 <b>You have no orders yet</b>\n\nPlace your first order in catalog!",
+    "select_order": "Select order to view details:",
     "order_info": "📋 <b>Order #{order_id}</b>\n📅 {date}\n💰 {total}₾\n📊 {status}",
     "view_details": "👁 Details",
     "cancel_order": "❌ Cancel order",

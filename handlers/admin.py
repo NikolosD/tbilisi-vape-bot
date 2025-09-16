@@ -438,9 +438,9 @@ async def show_admin_order(callback: CallbackQuery):
         await callback.answer("❌ Заказ не найден", show_alert=True)
         return
     
-    # Парсим продукты
-    products = json.loads(order[2])
-    user = await db.get_user(order[1])
+    # Используем свойство модели для получения продуктов
+    products = order.products_data
+    user = await db.get_user(order.user_id)
     
     status_text = {
         'waiting_payment': '⏳ Ожидает оплаты',
@@ -451,12 +451,12 @@ async def show_admin_order(callback: CallbackQuery):
         'cancelled': '❌ Отменен'
     }
     
-    order_text = f"""📋 <b>Заказ #{order[1]}</b>
+    order_text = f"""📋 <b>Заказ #{order.order_number}</b>
 
 👤 <b>Клиент:</b>
-• Имя: {user[2] if user else 'Неизвестно'}
-• Username: @{user[1] if user and user[1] else 'нет'}
-• ID: {order[2]}
+• Имя: {user.first_name if user else 'Неизвестно'}
+• Username: @{user.username if user and user.username else 'нет'}
+• ID: {order.user_id}
 
 📦 <b>Товары:</b>
 """
@@ -464,38 +464,38 @@ async def show_admin_order(callback: CallbackQuery):
     for product in products:
         order_text += f"• {product['name']} × {product['quantity']} = {product['price'] * product['quantity']}₾\n"
     
-    zone_info = DELIVERY_ZONES.get(order[5], {'name': 'Неизвестно'})
+    zone_info = DELIVERY_ZONES.get(order.delivery_zone, {'name': 'Неизвестно'})
     
     order_text += f"""
-🚚 <b>Доставка:</b> {zone_info['name']} - {order[6]}₾
-📍 <b>Адрес:</b> {order[8]}
-📱 <b>Телефон:</b> {order[7]}
-📅 <b>Дата:</b> {str(order[11])[:16]}
+🚚 <b>Доставка:</b> {zone_info['name']} - {order.delivery_price}₾
+📍 <b>Адрес:</b> {order.address}
+📱 <b>Телефон:</b> {order.phone}
+📅 <b>Дата:</b> {str(order.created_at)[:16]}
 
-💰 <b>Итого: {order[4]}₾</b>
+💰 <b>Итого: {order.total_price}₾</b>
 
-📊 <b>Статус:</b> {status_text.get(order[9], order[9])}"""
+📊 <b>Статус:</b> {status_text.get(order.status, order.status)}"""
     
     # Если есть скриншот оплаты, показываем его
-    if order[10]:  # payment_screenshot
+    if order.payment_screenshot:
         try:
             await callback.message.delete()
             await callback.message.answer_photo(
-                photo=order[10],
+                photo=order.payment_screenshot,
                 caption=order_text,
-                reply_markup=get_admin_order_actions_keyboard(order_id, order[9]),
+                reply_markup=get_admin_order_actions_keyboard(order_id, order.status),
                 parse_mode='HTML'
             )
         except:
             await callback.message.edit_text(
                 order_text + "\n\n📸 Скриншот оплаты прикреплен",
-                reply_markup=get_admin_order_actions_keyboard(order_id, order[9]),
+                reply_markup=get_admin_order_actions_keyboard(order_id, order.status),
                 parse_mode='HTML'
             )
     else:
         await callback.message.edit_text(
             order_text,
-            reply_markup=get_admin_order_actions_keyboard(order_id, order[8]),
+            reply_markup=get_admin_order_actions_keyboard(order_id, order.status),
             parse_mode='HTML'
         )
 
@@ -516,9 +516,9 @@ async def confirm_payment(callback: CallbackQuery):
     # Уведомляем клиента
     try:
         await callback.message.bot.send_message(
-            order[1],  # user_id
+            order.user_id,
             f"✅ <b>Оплата подтверждена!</b>\n\n"
-            f"Заказ #{order_id} принят в обработку.\n"
+            f"Заказ #{order.order_number} принят в обработку.\n"
             f"Готовим ваш заказ к отправке! 📦",
             parse_mode='HTML'
         )
@@ -546,9 +546,9 @@ async def reject_payment(callback: CallbackQuery):
     # Уведомляем клиента
     try:
         await callback.message.bot.send_message(
-            order[1],  # user_id
+            order.user_id,
             f"❌ <b>Оплата не подтверждена</b>\n\n"
-            f"Заказ #{order_id}: Скриншот оплаты не прошел проверку.\n"
+            f"Заказ #{order.order_number}: Скриншот оплаты не прошел проверку.\n"
             f"Пожалуйста, проверьте корректность перевода и пришлите новый скриншот.",
             parse_mode='HTML'
         )
@@ -576,10 +576,10 @@ async def ship_order(callback: CallbackQuery):
     # Уведомляем клиента
     try:
         await callback.message.bot.send_message(
-            order[1],  # user_id
+            order.user_id,
             f"🚚 <b>Заказ в пути!</b>\n\n"
-            f"Заказ #{order_id} отправлен по адресу:\n"
-            f"{order[7]}\n\n"
+            f"Заказ #{order.order_number} отправлен по адресу:\n"
+            f"{order.address}\n\n"
             f"Ожидайте курьера! 📦",
             parse_mode='HTML'
         )
@@ -607,9 +607,9 @@ async def deliver_order(callback: CallbackQuery):
     # Уведомляем клиента
     try:
         await callback.message.bot.send_message(
-            order[1],  # user_id
+            order.user_id,
             f"✅ <b>Заказ доставлен!</b>\n\n"
-            f"Заказ #{order_id} успешно доставлен.\n"
+            f"Заказ #{order.order_number} успешно доставлен.\n"
             f"Спасибо за покупку! 🙏\n\n"
             f"Оцените качество обслуживания и поделитесь отзывом!",
             parse_mode='HTML'
@@ -638,9 +638,9 @@ async def cancel_order(callback: CallbackQuery):
     # Уведомляем клиента
     try:
         await callback.message.bot.send_message(
-            order[1],  # user_id
+            order.user_id,
             f"❌ <b>Заказ отменен</b>\n\n"
-            f"Заказ #{order_id} был отменен администратором.\n"
+            f"Заказ #{order.order_number} был отменен администратором.\n"
             f"Если у вас есть вопросы, обратитесь в поддержку.",
             parse_mode='HTML'
         )
@@ -1102,15 +1102,15 @@ async def quick_confirm_payment(callback: CallbackQuery):
     if order:
         client_text = f"""✅ <b>Оплата подтверждена!</b>
 
-📋 <b>Заказ #{order[1]}</b>
-💰 <b>Сумма:</b> {order[3]}₾
+📋 <b>Заказ #{order.order_number}</b>
+💰 <b>Сумма:</b> {order.total_price}₾
 
 Ваш заказ принят в работу и будет доставлен в ближайшее время.
 Спасибо за покупку! 🎉"""
         
         try:
             await callback.bot.send_message(
-                order[1],  # user_id
+                order.user_id,
                 client_text,
                 parse_mode='HTML'
             )
@@ -1137,15 +1137,15 @@ async def quick_reject_payment(callback: CallbackQuery):
     if order:
         client_text = f"""❌ <b>Оплата не подтверждена</b>
 
-📋 <b>Заказ #{order[1]}</b>
-💰 <b>Сумма:</b> {order[3]}₾
+📋 <b>Заказ #{order.order_number}</b>
+💰 <b>Сумма:</b> {order.total_price}₾
 
 Пожалуйста, проверьте корректность перевода и пришлите новый скриншот.
 Или свяжитесь с поддержкой для уточнения деталей."""
         
         try:
             await callback.bot.send_message(
-                order[1],  # user_id
+                order.user_id,
                 client_text,
                 parse_mode='HTML'
             )
@@ -1212,9 +1212,9 @@ async def show_filtered_orders(callback: CallbackQuery):
             'cancelled': '❌'
         }
         
-        emoji = status_emoji.get(order[9], '❓')
-        text += f"{emoji} Заказ #{order[1]} - {order[4]}₾\n"
-        text += f"   {str(order[11])[:16]} - ID: {order[2]}\n\n"
+        emoji = status_emoji.get(order.status, '❓')
+        text += f"{emoji} Заказ #{order.order_number} - {order.total_price}₾\n"
+        text += f"   {str(order.created_at)[:16]} - ID: {order.user_id}\n\n"
     
     if len(orders) > 10:
         text += f"... и еще {len(orders) - 10} заказов"
@@ -1224,8 +1224,8 @@ async def show_filtered_orders(callback: CallbackQuery):
     for order in orders[:10]:
         keyboard.append([
             InlineKeyboardButton(
-                text=f"📋 Заказ #{order[1]}",
-                callback_data=f"admin_order_{order[0]}"
+                text=f"📋 Заказ #{order.order_number}",
+                callback_data=f"admin_order_{order.id}"
             )
         ])
     
