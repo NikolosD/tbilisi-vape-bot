@@ -1,1 +1,1 @@
-web: python main.py
+web: RENDER=1 python main.py

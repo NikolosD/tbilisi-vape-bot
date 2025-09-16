@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import signal
+import sys
 from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
@@ -101,34 +103,60 @@ async def health_check(request):
     """Health check endpoint для Render"""
     return web.Response(text="Bot is running!")
 
+async def shutdown_handler():
+    """Обработчик корректного завершения работы"""
+    logger.info("Получен сигнал завершения работы...")
+    try:
+        await db.close_pool()
+    except:
+        pass
+    try:
+        await bot.session.close()
+    except:
+        pass
+    logger.info("Завершение работы завершено")
+
 async def main():
     """Запуск бота"""
+    # Обработка сигналов для корректного завершения
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, lambda s, f: asyncio.create_task(shutdown_handler()))
+    
     try:
+        logger.info("🔥 Запуск Tbilisi VAPE Shop Bot...")
         logger.info("Инициализация базы данных...")
         await init_db()
         
+        # Удаляем webhook перед началом работы
+        logger.info("Очистка webhook...")
+        await bot.delete_webhook(drop_pending_updates=True)
+        
+        # Небольшая задержка для избежания конфликтов
+        await asyncio.sleep(2)
+        
         # Запуск веб-сервера для Render
         if os.getenv('RENDER'):
-            logger.info("Запуск в режиме веб-сервиса для Render...")
+            logger.info("🚀 Запуск в режиме веб-сервиса для Render...")
             app = web.Application()
             app.router.add_get('/', health_check)
             app.router.add_get('/health', health_check)
             
             # Запуск бота в фоне
-            asyncio.create_task(dp.start_polling(bot))
+            asyncio.create_task(dp.start_polling(bot, drop_pending_updates=True))
             
             # Запуск веб-сервера
             port = int(os.getenv('PORT', 10000))
+            logger.info(f"🌐 Веб-сервер запущен на порту {port}")
             await web._run_app(app, host='0.0.0.0', port=port)
         else:
-            logger.info("Запуск в режиме polling...")
-            await dp.start_polling(bot)
+            logger.info("🚀 Запуск в режиме polling...")
+            await dp.start_polling(bot, drop_pending_updates=True)
             
     except Exception as e:
-        logger.error(f"Ошибка при запуске бота: {e}")
+        logger.error(f"❌ Ошибка при запуске бота: {e}")
+        raise
     finally:
-        await db.close_pool()
-        await bot.session.close()
+        await shutdown_handler()
 
 if __name__ == "__main__":
     asyncio.run(main())
