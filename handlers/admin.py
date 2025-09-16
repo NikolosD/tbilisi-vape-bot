@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import json
@@ -32,12 +32,13 @@ def admin_filter(message_or_callback):
 async def show_admin_panel(callback: CallbackQuery):
     """Показать админ панель"""
     pending_orders = await db.get_pending_orders()
+    products = await db.get_products()
     
     await callback.message.edit_text(
         f"🔧 <b>Админ-панель</b>\n\n"
         f"📊 <b>Статистика:</b>\n"
         f"🆕 Новых заказов: {len(pending_orders)}\n"
-        f"📦 Товаров в каталоге: {len(await db.get_products())}\n\n"
+        f"📦 Товаров в каталоге: {len(products)}\n\n"
         f"Выберите действие:",
         reply_markup=get_admin_keyboard(),
         parse_mode='HTML'

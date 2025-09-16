@@ -62,6 +62,15 @@ async def cmd_admin(message: Message):
         await message.answer("❌ У вас нет доступа к админ-панели")
         return
     
+    # Убеждаемся, что пользователь существует в базе
+    user = await db.get_user(user_id)
+    if not user:
+        await db.add_user(
+            user_id=user_id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name
+        )
+    
     from keyboards import get_admin_keyboard
     await message.answer(
         "🔧 <b>Админ-панель</b>\n\nВыберите действие:",

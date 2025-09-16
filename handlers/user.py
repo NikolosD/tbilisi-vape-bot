@@ -218,6 +218,16 @@ async def add_to_cart(callback: CallbackQuery):
         await callback.answer("❌ Товара нет в наличии", show_alert=True)
         return
     
+    # Убеждаемся, что пользователь существует в базе
+    user = await db.get_user(user_id)
+    if not user:
+        # Добавляем пользователя в базу
+        await db.add_user(
+            user_id=user_id,
+            username=callback.from_user.username,
+            first_name=callback.from_user.first_name
+        )
+    
     # Добавляем в корзину
     await db.add_to_cart(user_id, product_id, 1)
     
