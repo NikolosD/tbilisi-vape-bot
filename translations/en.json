@@ -5,6 +5,7 @@
     "orders": "📋 My Orders",
     "contact": "💬 Contact",
     "info": "ℹ️ Information",
+    "language": "🌐 Language",
     "admin_panel": "🔧 Admin Panel"
   },
   "catalog": {
@@ -85,5 +86,35 @@
     "back_to_panel": "🔙 Admin Panel",
     "back_to_products": "🔙 Product Management",
     "back_to_categories": "🔙 Category Management"
+  },
+  "welcome": {
+    "title": "🔥 <b>Welcome to Tbilisi VAPE Shop!</b>",
+    "description": "🚬 Best disposable e-cigarettes in Tbilisi\n🚀 Fast delivery throughout the city\n💯 Only original products\n💰 Best prices in the city",
+    "start_shopping": "🛍 Start shopping"
+  },
+  "language": {
+    "select": "🌐 <b>Choose language:</b>",
+    "russian": "🇷🇺 Русский",
+    "english": "🇺🇸 English",
+    "changed": "✅ Language changed to {language}"
+  },
+
+  "common": {
+    "back": "🔙 Back",
+    "main_menu": "🔙 Main menu",
+    "to_catalog": "🔙 To catalog",
+    "to_categories": "🔙 To categories",
+    "to_orders": "🔙 To orders",
+    "to_admin": "🔙 Admin panel",
+    "to_products": "🔙 Product management",
+    "to_orders_admin": "🔙 To orders",
+    "cancel": "❌ Cancel",
+    "confirm": "✅ Confirm",
+    "remove": "🗑 Remove",
+    "paid": "💳 Paid",
+    "my_orders": "📋 My orders",
+    "share_phone": "📱 Share phone number",
+    "resend_screenshot": "📸 Resend receipt",
+    "order_number": "Order #{order_id} - {total}₾"
   }
 }

@@ -11,6 +11,7 @@ class I18n:
         self.default_language = default_language
         self.translations: Dict[str, Dict[str, Any]] = {}
         self.current_language = default_language
+        self.user_languages: Dict[int, str] = {}  # user_id -> language
         self.load_translations()
     
     def load_translations(self):
@@ -146,10 +147,15 @@ class I18n:
         with open("translations/ru.json", 'w', encoding='utf-8') as f:
             json.dump(default_translations, f, ensure_ascii=False, indent=2)
     
-    def t(self, key: str, **kwargs) -> str:
-        """Получить перевод по ключу"""
+    def t(self, key: str, user_id: int = None, **kwargs) -> str:
+        """Получить перевод по ключу для конкретного пользователя"""
+        # Определяем язык для пользователя
+        language = self.current_language
+        if user_id and user_id in self.user_languages:
+            language = self.user_languages[user_id]
+        
         keys = key.split('.')
-        translation = self.translations.get(self.current_language, {})
+        translation = self.translations.get(language, {})
         
         # Ищем перевод по вложенным ключам
         for k in keys:
@@ -174,15 +180,23 @@ class I18n:
         
         return str(translation)
     
-    def set_language(self, language: str):
-        """Установить язык"""
+    def set_language(self, language: str, user_id: int = None):
+        """Установить язык для пользователя или глобально"""
         if language in self.translations:
-            self.current_language = language
+            if user_id:
+                self.user_languages[user_id] = language
+            else:
+                self.current_language = language
+    
+    def get_user_language(self, user_id: int) -> str:
+        """Получить язык пользователя"""
+        return self.user_languages.get(user_id, self.default_language)
 
 # Глобальный экземпляр
 i18n = I18n()
 
 # Функция для удобства
-def _(key: str, **kwargs) -> str:
+def _(key: str, user_id: int = None, **kwargs) -> str:
     """Короткая функция для получения перевода"""
-    return i18n.t(key, **kwargs)
+    return i18n.t(key, user_id=user_id, **kwargs)
+

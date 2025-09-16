@@ -11,6 +11,8 @@ from keyboards import (
     get_admin_orders_keyboard, get_admin_order_actions_keyboard,
     get_admin_categories_keyboard, get_category_selection_keyboard
 )
+import i18n
+from i18n import _
 
 router = Router()
 
@@ -100,7 +102,7 @@ async def edit_product_menu(callback: CallbackQuery):
     product = await db.get_product(product_id)
     
     if not product:
-        await callback.answer("❌ Товар не найден", show_alert=True)
+        await callback.answer(_("common.not_found", user_id=callback.from_user.id), show_alert=True)
         return
     
     keyboard = [
@@ -163,7 +165,7 @@ async def toggle_product_stock(callback: CallbackQuery):
     product = await db.get_product(product_id)
     
     if not product:
-        await callback.answer("❌ Товар не найден", show_alert=True)
+        await callback.answer(_("common.not_found", user_id=callback.from_user.id), show_alert=True)
         return
     
     new_stock = not product[6]  # Инвертируем статус

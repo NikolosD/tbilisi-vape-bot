@@ -14,6 +14,7 @@ from database import db, init_db
 from keyboards import get_main_menu
 from handlers.user import router as user_router
 from handlers.admin import router as admin_router
+from i18n import _
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -36,23 +37,20 @@ async def cmd_start(message: Message):
     first_name = message.from_user.first_name
     
     # Добавляем пользователя в базу данных
-    db.add_user(user_id, username, first_name)
+    await db.add_user(user_id, username, first_name)
     
     # Проверяем, является ли пользователь администратором
     is_admin = user_id in ADMIN_IDS
     
-    welcome_text = """🔥 <b>Добро пожаловать в Tbilisi VAPE Shop!</b>
+    welcome_text = f"""{_('welcome.title', user_id=user_id)}
 
-🚬 Лучшие одноразовые электронные сигареты в Тбилиси
-🚀 Быстрая доставка по всему городу
-💯 Только оригинальная продукция
-💰 Лучшие цены в городе
+{_('welcome.description', user_id=user_id)}
 
 Выберите действие в меню ниже:"""
     
     await message.answer(
         welcome_text,
-        reply_markup=get_main_menu(is_admin=is_admin),
+        reply_markup=get_main_menu(is_admin=is_admin, user_id=user_id),
         parse_mode='HTML'
     )
 

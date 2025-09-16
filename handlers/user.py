@@ -11,10 +11,11 @@ from config import DELIVERY_ZONES, MIN_ORDER_AMOUNT, PAYMENT_INFO, ADMIN_IDS
 # Настройка логгера
 logger = logging.getLogger(__name__)
 from keyboards import (
-    get_main_menu, get_categories_keyboard, get_catalog_keyboard, get_product_card_keyboard,
+    get_main_menu, get_main_menu_inline, get_categories_keyboard, get_catalog_keyboard, get_product_card_keyboard,
     get_cart_keyboard, get_delivery_zones_keyboard, get_order_confirmation_keyboard,
-    get_orders_keyboard, get_order_details_keyboard, get_contact_keyboard
+    get_orders_keyboard, get_order_details_keyboard, get_contact_keyboard, get_language_keyboard
 )
+import i18n
 from i18n import _
 
 router = Router()
@@ -26,22 +27,23 @@ class OrderStates(StatesGroup):
     waiting_payment_screenshot = State()
 
 # Обработчик текстовых сообщений из главного меню
-@router.message(F.text == _("menu.catalog"))
+@router.message(F.text.in_(["🛍 Каталог", "🛍 Catalog"]))
 async def show_catalog(message: Message):
     """Показать каталог категорий"""
+    user_id = message.from_user.id
     categories = await db.get_categories_with_products()
     
     if not categories:
-        await message.answer(_("catalog.empty"))
+        await message.answer(_("catalog.empty", user_id=user_id))
         return
     
     await message.answer(
-        f"{_('catalog.title')}\n\n{_('catalog.select_category')}",
+        f"{_('catalog.title', user_id=user_id)}\n\n{_('catalog.select_category', user_id=user_id)}",
         reply_markup=get_categories_keyboard(categories),
         parse_mode='HTML'
     )
 
-@router.message(F.text == _("menu.cart"))
+@router.message(F.text.in_(["🛒 Корзина", "🛒 Cart"]))
 async def show_cart(message: Message):
     """Показать корзину"""
     user_id = message.from_user.id
@@ -63,7 +65,7 @@ async def show_cart(message: Message):
         cart_text += f"  Количество: {quantity} шт.\n"
         cart_text += f"  Цена: {price}₾ × {quantity} = {price * quantity}₾\n\n"
     
-    cart_text += f"💰 <b>Итого: {total}₾</b>"
+    cart_text += _("cart.total", total=total)
     
     await message.answer(
         cart_text,
@@ -71,7 +73,7 @@ async def show_cart(message: Message):
         parse_mode='HTML'
     )
 
-@router.message(F.text == _("menu.orders"))
+@router.message(F.text.in_(["📋 Мои заказы", "📋 My Orders"]))
 async def show_orders(message: Message):
     """Показать заказы пользователя"""
     user_id = message.from_user.id
@@ -86,11 +88,11 @@ async def show_orders(message: Message):
     
     await message.answer(
         "📋 <b>Ваши заказы:</b>\n\nВыберите заказ для просмотра деталей:",
-        reply_markup=get_orders_keyboard(orders),
+        reply_markup=get_orders_keyboard(orders, user_id=user_id),
         parse_mode='HTML'
     )
 
-@router.message(F.text == _("menu.contact"))
+@router.message(F.text.in_(["💬 Связь", "💬 Contact"]))
 async def show_contact(message: Message):
     """Показать контактную информацию"""
     contact_text = """💬 <b>Связь с нами</b>
@@ -109,7 +111,17 @@ async def show_contact(message: Message):
 
     await message.answer(contact_text, parse_mode='HTML')
 
-@router.message(F.text == _("menu.info"))
+# Обработчик кнопки смены языка
+@router.message(F.text == "🌐 Язык")
+async def show_language_selection(message: Message):
+    """Показать выбор языка"""
+    await message.answer(
+        _("language.select", user_id=message.from_user.id),
+        reply_markup=get_language_keyboard(user_id=user_id),
+        parse_mode='HTML'
+    )
+
+@router.message(F.text.in_(["ℹ️ Информация", "ℹ️ Information"]))
 async def show_info(message: Message):
     """Показать информацию о магазине"""
     info_text = """ℹ️ <b>Информация о магазине</b>
@@ -167,7 +179,7 @@ async def show_category_products(callback: CallbackQuery):
     products = await db.get_products(category_id)
     
     if not products:
-        await callback.answer("📦 В этой категории пока нет товаров", show_alert=True)
+        await callback.answer(_("catalog.category_empty"), show_alert=True)
         return
     
     category = await db.get_category(category_id)
@@ -187,7 +199,7 @@ async def show_product(callback: CallbackQuery):
     product = await db.get_product(product_id)
     
     if not product:
-        await callback.answer("❌ Товар не найден", show_alert=True)
+        await callback.answer(_("common.not_found"), show_alert=True)
         return
     
     # Проверяем, есть ли товар в корзине
@@ -240,7 +252,7 @@ async def add_to_cart(callback: CallbackQuery):
     # Проверяем существование товара
     product = await db.get_product(product_id)
     if not product or product[6] == 0:  # Если товара нет в наличии
-        await callback.answer("❌ Товара нет в наличии", show_alert=True)
+        await callback.answer(_("common.error"), show_alert=True)
         return
     
     # Убеждаемся, что пользователь существует в базе
@@ -256,7 +268,7 @@ async def add_to_cart(callback: CallbackQuery):
     # Добавляем в корзину
     await db.add_to_cart(user_id, product_id, 1)
     
-    await callback.answer(f"✅ {product[1]} добавлен в корзину!")
+    await callback.answer(_("cart.item_added"))
     
     # Обновляем кнопки
     keyboard = get_product_card_keyboard(product_id, in_cart=True)
@@ -279,7 +291,7 @@ async def cart_increase(callback: CallbackQuery):
     new_quantity = current_quantity + 1
     await db.update_cart_quantity(user_id, product_id, new_quantity)
     
-    await callback.answer(f"✅ Количество увеличено до {new_quantity}")
+    await callback.answer(_("cart.quantity_increased", quantity=new_quantity))
     
     # Обновляем корзину если мы на странице корзины
     if "cart" in callback.message.text:
@@ -301,11 +313,11 @@ async def cart_decrease(callback: CallbackQuery):
     
     if current_quantity <= 1:
         await db.remove_from_cart(user_id, product_id)
-        await callback.answer("🗑 Товар удален из корзины")
+        await callback.answer(_("cart.item_deleted"))
     else:
         new_quantity = current_quantity - 1
         await db.update_cart_quantity(user_id, product_id, new_quantity)
-        await callback.answer(f"✅ Количество уменьшено до {new_quantity}")
+        await callback.answer(_("cart.quantity_decreased", quantity=new_quantity))
     
     # Обновляем корзину если мы на странице корзины
     if "cart" in callback.message.text:
@@ -320,7 +332,7 @@ async def cart_remove(callback: CallbackQuery):
     product = await db.get_product(product_id)
     await db.remove_from_cart(user_id, product_id)
     
-    await callback.answer(f"🗑 {product[1]} удален из корзины")
+    await callback.answer(_("cart.item_removed"))
     
     # Обновляем корзину если мы на странице корзины
     if "cart" in callback.message.text:
@@ -351,7 +363,7 @@ async def update_cart_display(callback: CallbackQuery):
         cart_text += f"  Количество: {quantity} шт.\n"
         cart_text += f"  Цена: {price}₾ × {quantity} = {price * quantity}₾\n\n"
     
-    cart_text += f"💰 <b>Итого: {total}₾</b>"
+    cart_text += _("cart.total", total=total)
     
     await callback.message.edit_text(
         cart_text,
@@ -377,7 +389,7 @@ async def start_checkout(callback: CallbackQuery, state: FSMContext):
     cart_items = await db.get_cart(user_id)
     
     if not cart_items:
-        await callback.answer("❌ Корзина пуста!", show_alert=True)
+        await callback.answer(_("cart.empty"), show_alert=True)
         return
     
     total = sum(item[1] * item[3] for item in cart_items)
@@ -475,7 +487,7 @@ async def process_address(message: Message, state: FSMContext):
     logger.info(f"Данные состояния: {data}")
     
     if 'delivery_zone' not in data:
-        await message.answer("❌ Ошибка: данные заказа потеряны. Начните заказ заново.")
+        await message.answer(_("common.error"))
         await state.clear()
         return
         
@@ -490,7 +502,7 @@ async def process_address(message: Message, state: FSMContext):
     
     if not cart_items:
         logger.warning(f"Корзина пуста для пользователя {user_id}")
-        await message.answer("❌ Корзина пуста!")
+        await message.answer(_("cart.empty"))
         await state.clear()
         return
     
@@ -664,7 +676,7 @@ async def show_my_orders(callback: CallbackQuery):
     
     await callback.message.edit_text(
         "📋 <b>Ваши заказы:</b>\n\nВыберите заказ для просмотра деталей:",
-        reply_markup=get_orders_keyboard(orders),
+        reply_markup=get_orders_keyboard(orders, user_id=user_id),
         parse_mode='HTML'
     )
 
@@ -755,14 +767,147 @@ async def back_to_menu(callback: CallbackQuery):
     user_id = callback.from_user.id
     is_admin = user_id in ADMIN_IDS
     
-    await callback.message.delete()
-    await callback.message.answer(
-        "🏠 <b>Главное меню</b>\n\nВыберите действие:",
-        reply_markup=get_main_menu(is_admin=is_admin),
+    await callback.message.edit_text(
+        _("welcome.title", user_id=user_id) + "\n\n" + _("welcome.description", user_id=user_id),
+        reply_markup=get_main_menu_inline(is_admin=is_admin, user_id=user_id),
         parse_mode='HTML'
     )
+
+# Обработчики смены языка
+@router.callback_query(F.data.startswith("lang_"))
+async def change_language(callback: CallbackQuery):
+    """Сменить язык пользователя"""
+    user_id = callback.from_user.id
+    language = callback.data.split("_")[1]
+    
+    # Устанавливаем язык для пользователя
+    i18n.i18n.set_language(language, user_id)
+    
+    # Получаем название языка для сообщения
+    language_names = {
+        "ru": "Русский",
+        "en": "English"
+    }
+    
+    # Показываем уведомление о смене языка
+    await callback.answer(
+        _("language.changed", user_id=user_id, language=language_names.get(language, language)),
+        show_alert=True
+    )
+    
+    # Обновляем главное меню с новым языком
+    is_admin = user_id in ADMIN_IDS
+    try:
+        await callback.message.edit_text(
+            _("welcome.title", user_id=user_id) + "\n\n" + _("welcome.description", user_id=user_id),
+            reply_markup=get_main_menu_inline(is_admin=is_admin, user_id=user_id),
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        # Если не удалось отредактировать сообщение, отправляем новое
+        await callback.message.answer(
+            _("welcome.title", user_id=user_id) + "\n\n" + _("welcome.description", user_id=user_id),
+            reply_markup=get_main_menu_inline(is_admin=is_admin, user_id=user_id),
+            parse_mode='HTML'
+        )
+    
+    # Обновляем reply клавиатуру с переводами для нового языка
+    await callback.message.answer(
+        _("language.changed", user_id=user_id, language=language_names.get(language, language)),
+        reply_markup=get_main_menu(is_admin=is_admin, user_id=user_id),
+        parse_mode='HTML'
+    )
+
+# Обработчики для inline кнопок главного меню
+@router.callback_query(F.data == "catalog")
+async def callback_catalog(callback: CallbackQuery):
+    """Показать каталог через callback"""
+    await show_catalog_callback(callback)
 
 @router.callback_query(F.data == "cart")
 async def callback_cart(callback: CallbackQuery):
     """Показать корзину через callback"""
     await update_cart_display(callback)
+
+@router.callback_query(F.data == "my_orders")
+async def callback_orders(callback: CallbackQuery):
+    """Показать заказы через callback"""
+    await show_orders_callback(callback)
+
+@router.callback_query(F.data == "contact")
+async def callback_contact(callback: CallbackQuery):
+    """Показать контакт через callback"""
+    await show_contact_callback(callback)
+
+@router.callback_query(F.data == "info")
+async def callback_info(callback: CallbackQuery):
+    """Показать информацию через callback"""
+    await show_info_callback(callback)
+
+@router.callback_query(F.data == "language")
+async def callback_language(callback: CallbackQuery):
+    """Показать выбор языка через callback"""
+    await show_language_selection_callback(callback)
+
+# Callback версии функций для inline кнопок
+async def show_catalog_callback(callback: CallbackQuery):
+    """Показать каталог категорий через callback"""
+    user_id = callback.from_user.id
+    categories = await db.get_categories_with_products()
+    
+    if not categories:
+        await callback.message.edit_text(_("catalog.empty", user_id=user_id))
+        return
+    
+    await callback.message.edit_text(
+        f"{_('catalog.title', user_id=user_id)}\n\n{_('catalog.select_category', user_id=user_id)}",
+        reply_markup=get_categories_keyboard(categories),
+        parse_mode='HTML'
+    )
+
+async def show_orders_callback(callback: CallbackQuery):
+    """Показать заказы пользователя через callback"""
+    user_id = callback.from_user.id
+    orders = await db.get_user_orders(user_id)
+    
+    if not orders:
+        await callback.message.edit_text(_("orders.empty", user_id=user_id), parse_mode='HTML')
+        return
+    
+    await callback.message.edit_text(
+        _("orders.title", user_id=user_id) + "\n\n" + _("orders.select_order", user_id=user_id),
+        reply_markup=get_orders_keyboard(orders, user_id=user_id),
+        parse_mode='HTML'
+    )
+
+async def show_contact_callback(callback: CallbackQuery):
+    """Показать контактную информацию через callback"""
+    user_id = callback.from_user.id
+    await callback.message.edit_text(
+        _("contact.title", user_id=user_id) + "\n\n" + _("contact.description", user_id=user_id),
+        parse_mode='HTML'
+    )
+
+async def show_info_callback(callback: CallbackQuery):
+    """Показать информацию о магазине через callback"""
+    user_id = callback.from_user.id
+    info_text = f"""{_("info.title", user_id=user_id)}
+
+{_("info.shop_name", user_id=user_id)}
+
+{_("info.advantages", user_id=user_id)}
+
+{_("info.delivery", user_id=user_id, min_order=MIN_ORDER_AMOUNT)}
+
+{_("info.payment", user_id=user_id)}"""
+    
+    await callback.message.edit_text(info_text, parse_mode='HTML')
+
+async def show_language_selection_callback(callback: CallbackQuery):
+    """Показать выбор языка через callback"""
+    user_id = callback.from_user.id
+    await callback.message.edit_text(
+        _("language.select", user_id=user_id),
+        reply_markup=get_language_keyboard(user_id=user_id),
+        parse_mode='HTML'
+    )
