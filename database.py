@@ -153,22 +153,37 @@ class Database:
     # Методы для работы с заказами
     async def create_order(self, user_id, products, total_price, delivery_zone, delivery_price, phone, address):
         """Создание заказа"""
+        import random
+        
+        # Генерируем уникальный номер заказа (5-6 цифр)
+        while True:
+            order_number = random.randint(10000, 999999)
+            # Проверяем что такого номера еще нет
+            existing = await self.fetchone("SELECT id FROM orders WHERE order_number = $1", order_number)
+            if not existing:
+                break
+        
         query = """
-        INSERT INTO orders (user_id, products, total_price, delivery_zone, delivery_price, phone, address) 
-        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+        INSERT INTO orders (order_number, user_id, products, total_price, delivery_zone, delivery_price, phone, address) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, order_number
         """
         # Преобразуем цены в float для корректной сериализации
         total_price_float = float(total_price)
         delivery_price_float = float(delivery_price)
         
-        result = await self.fetchone(query, user_id, json.dumps(products), total_price_float, 
+        result = await self.fetchone(query, order_number, user_id, json.dumps(products), total_price_float, 
                                    delivery_zone, delivery_price_float, phone, address)
-        return result['id']
+        return result['order_number']  # Возвращаем order_number вместо id
     
     async def get_order(self, order_id):
         """Получение заказа по ID"""
         query = "SELECT * FROM orders WHERE id = $1"
         return await self.fetchone(query, order_id)
+    
+    async def get_order_by_number(self, order_number):
+        """Получение заказа по номеру заказа"""
+        query = "SELECT * FROM orders WHERE order_number = $1"
+        return await self.fetchone(query, order_number)
     
     async def get_user_orders(self, user_id):
         """Получение заказов пользователя"""
@@ -189,6 +204,11 @@ class Database:
         """Получение заказов ожидающих обработки"""
         query = "SELECT * FROM orders WHERE status IN ('waiting_payment', 'payment_check', 'paid', 'shipping') ORDER BY created_at"
         return await self.fetchall(query)
+    
+    async def get_all_orders(self, limit=50):
+        """Получение всех заказов (для админа)"""
+        query = "SELECT * FROM orders ORDER BY created_at DESC LIMIT $1"
+        return await self.fetchall(query, limit)
 
 
 async def init_db():
@@ -229,6 +249,7 @@ async def init_db():
     # Таблица заказов
     await conn.execute('''CREATE TABLE IF NOT EXISTS orders (
         id SERIAL PRIMARY KEY,
+        order_number INTEGER UNIQUE,
         user_id BIGINT,
         products TEXT,
         total_price DECIMAL(10,2),
@@ -241,6 +262,12 @@ async def init_db():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users (user_id)
     )''')
+    
+    # Добавляем поле order_number если его нет (для существующих баз)
+    try:
+        await conn.execute('ALTER TABLE orders ADD COLUMN order_number INTEGER UNIQUE')
+    except:
+        pass  # Поле уже существует
     
     # Таблица корзины
     await conn.execute('''CREATE TABLE IF NOT EXISTS cart (

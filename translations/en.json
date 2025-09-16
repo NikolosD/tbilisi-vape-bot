@@ -76,6 +76,7 @@
     "panel": "🔧 <b>Admin Panel</b>",
     "products": "📦 Product Management",
     "orders": "📋 New Orders",
+    "all_orders": "📋 All Orders",
     "stats": "📊 Statistics",
     "broadcast": "📢 Broadcast",
     "categories": "🏷️ Category Management",
@@ -99,6 +100,15 @@
     "changed": "✅ Language changed to {language}"
   },
 
+  "admin_actions": {
+    "confirm_payment": "✅ Confirm Payment",
+    "reject_payment": "❌ Reject Payment",
+    "mark_shipped": "🚚 Mark as Shipped",
+    "mark_delivered": "✅ Mark as Delivered",
+    "cancel_order": "❌ Cancel Order",
+    "change_status": "🔄 Change Status"
+  },
+
   "common": {
     "back": "🔙 Back",
     "main_menu": "🔙 Main menu",
@@ -108,6 +118,7 @@
     "to_admin": "🔙 Admin panel",
     "to_products": "🔙 Product management",
     "to_orders_admin": "🔙 To orders",
+    "to_all_orders": "🔙 All orders",
     "cancel": "❌ Cancel",
     "confirm": "✅ Confirm",
     "remove": "🗑 Remove",

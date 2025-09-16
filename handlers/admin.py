@@ -3,16 +3,19 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKe
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import json
+import time
 
 from database import db
 from config import ADMIN_IDS, DELIVERY_ZONES
 from keyboards import (
     get_admin_keyboard, get_admin_products_keyboard, 
     get_admin_orders_keyboard, get_admin_order_actions_keyboard,
-    get_admin_categories_keyboard, get_category_selection_keyboard
+    get_admin_categories_keyboard, get_category_selection_keyboard,
+    get_change_status_keyboard
 )
 import i18n
 from i18n import _
+from anti_spam import anti_spam
 
 router = Router()
 
@@ -335,6 +338,49 @@ async def process_product_no_photo(message: Message, state: FSMContext):
     await state.clear()
 
 # Управление заказами
+@router.callback_query(F.data == "admin_all_orders", admin_filter)
+async def admin_all_orders_menu(callback: CallbackQuery):
+    """Меню всех заказов для админа"""
+    orders = await db.get_all_orders(50)  # Показываем последние 50 заказов
+    
+    if not orders:
+        text = "📋 <b>Все заказы</b>\n\nЗаказов пока нет."
+        
+        try:
+            await callback.message.edit_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text=_("common.to_admin"), callback_data="admin_panel")]
+                ]),
+                parse_mode='HTML'
+            )
+        except Exception:
+            await callback.message.delete()
+            await callback.message.answer(
+                text,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text=_("common.to_admin"), callback_data="admin_panel")]
+                ]),
+                parse_mode='HTML'
+            )
+        return
+    
+    text = f"📋 <b>Все заказы</b>\n\nВсего: {len(orders)} заказов\n\nВыберите заказ:"
+    
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_admin_orders_keyboard(orders),
+            parse_mode='HTML'
+        )
+    except Exception:
+        await callback.message.delete()
+        await callback.message.answer(
+            text,
+            reply_markup=get_admin_orders_keyboard(orders),
+            parse_mode='HTML'
+        )
+
 @router.callback_query(F.data == "admin_orders", admin_filter)
 async def admin_orders_menu(callback: CallbackQuery):
     """Меню заказов для админа"""
@@ -349,18 +395,36 @@ async def admin_orders_menu(callback: CallbackQuery):
         )
         return
     
-    await callback.message.edit_text(
-        f"📋 <b>Заказы требующие внимания</b>\n\n"
-        f"Всего: {len(orders)} заказов\n\n"
-        f"Выберите заказ:",
-        reply_markup=get_admin_orders_keyboard(orders),
-        parse_mode='HTML'
-    )
+    text = f"📋 <b>Заказы требующие внимания</b>\n\nВсего: {len(orders)} заказов\n\nВыберите заказ:"
+    
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_admin_orders_keyboard(orders),
+            parse_mode='HTML'
+        )
+    except Exception:
+        # Если не удалось отредактировать (например, это было сообщение с фото), 
+        # удаляем старое и отправляем новое
+        await callback.message.delete()
+        await callback.message.answer(
+            text,
+            reply_markup=get_admin_orders_keyboard(orders),
+            parse_mode='HTML'
+        )
 
 @router.callback_query(F.data.startswith("admin_order_"), admin_filter)
 async def show_admin_order(callback: CallbackQuery):
     """Показать детали заказа для админа"""
-    order_id = int(callback.data.split("_")[2])
+    # Определяем формат callback_data и извлекаем order_id
+    parts = callback.data.split("_")
+    if parts[0] == "admin" and parts[1] == "order":
+        order_id = int(parts[2])  # admin_order_X
+    elif len(parts) >= 3:
+        order_id = int(parts[-1])  # admin_confirm_payment_X, admin_ship_X, etc.
+    else:
+        await callback.answer("❌ Ошибка: некорректный формат данных", show_alert=True)
+        return
     order = await db.get_order(order_id)
     
     if not order:
@@ -762,3 +826,258 @@ async def process_category_description(message: Message, state: FSMContext):
     )
     
     await state.clear()
+
+# Обработчики для управления статусами заказов
+@router.callback_query(F.data.startswith("admin_change_status_"), admin_filter)
+async def change_order_status_menu(callback: CallbackQuery):
+    """Показать меню смены статуса заказа"""
+    order_id = int(callback.data.split("_")[-1])
+    
+    await callback.message.edit_text(
+        f"🔄 <b>Изменить статус заказа #{order_id}</b>\n\nВыберите новый статус:",
+        reply_markup=get_change_status_keyboard(order_id),
+        parse_mode="HTML"
+    )
+
+@router.callback_query(F.data.startswith("set_status_"), admin_filter)  
+async def set_order_status(callback: CallbackQuery):
+    """Установить новый статус заказа"""
+    parts = callback.data.split("_")
+    new_status = "_".join(parts[2:-1])  # Получаем статус между "set_status_" и номером заказа
+    order_id = int(parts[-1])
+    
+    # Обновляем статус
+    await db.update_order_status(order_id, new_status)
+    
+    status_names = {
+        "waiting_payment": "ожидает оплаты",
+        "payment_check": "на проверке оплаты", 
+        "paid": "оплачен",
+        "shipping": "отправлен",
+        "delivered": "доставлен",
+        "cancelled": "отменен"
+    }
+    
+    await callback.answer(f"✅ Статус изменен на \"{status_names.get(new_status, new_status)}\"")
+    
+    # Возвращаемся к заказу
+    await show_admin_order(callback)
+
+
+
+# Команды для управления спамом (только для админов)
+@router.message(F.text == "/antispam", admin_filter)
+async def show_antispam_menu(message: Message):
+    """Показать меню анти-спам системы"""
+    blocked_count = len(anti_spam.get_blocked_users())
+    total_users = len(anti_spam.user_stats)
+    
+    text = f"""🛡 <b>Анти-спам система</b>
+
+📊 <b>Статистика:</b>
+• Всего пользователей: {total_users}
+• Заблокированных: {blocked_count}
+
+⚙️ <b>Настройки:</b>
+• Макс. сообщений/мин: {anti_spam.MAX_MESSAGES_PER_MINUTE}
+• Макс. сообщений/час: {anti_spam.MAX_MESSAGES_PER_HOUR}
+• Мин. интервал: {anti_spam.MIN_MESSAGE_INTERVAL}с
+• Порог блокировки: {anti_spam.SPAM_THRESHOLD}
+
+<b>Команды:</b>
+/blocked - список заблокированных
+/unblock [ID] - разблокировать пользователя
+/stats [ID] - статистика пользователя
+/block [ID] - заблокировать пользователя"""
+
+    await message.answer(text, parse_mode="HTML")
+
+@router.message(F.text == "/blocked", admin_filter)
+async def show_blocked_users(message: Message):
+    """Показать заблокированных пользователей"""
+    blocked = anti_spam.get_blocked_users()
+    
+    if not blocked:
+        await message.answer("✅ Заблокированных пользователей нет.")
+        return
+    
+    text = "🚫 <b>Заблокированные пользователи:</b>\n\n"
+    
+    for user in blocked[:10]:  # Показываем первые 10
+        user_id = user["user_id"]
+        spam_score = user["spam_score"]
+        warnings = user["warning_count"]
+        
+        if user["permanent"]:
+            status = "Навсегда"
+        else:
+            remaining = user["remaining_time"]
+            status = f"{remaining}с" if remaining > 0 else "Истекает"
+        
+        text += f"• ID: {user_id}\n"
+        text += f"  Спам-счет: {spam_score}, Предупреждения: {warnings}\n"
+        text += f"  Блокировка: {status}\n\n"
+    
+    if len(blocked) > 10:
+        text += f"... и еще {len(blocked) - 10} пользователей"
+    
+    await message.answer(text, parse_mode="HTML")
+
+@router.message(F.text.startswith("/unblock "), admin_filter)
+async def unblock_user_command(message: Message):
+    """Разблокировать пользователя"""
+    try:
+        user_id = int(message.text.split()[1])
+        anti_spam.unblock_user(user_id)
+        await message.answer(f"✅ Пользователь {user_id} разблокирован.")
+    except (ValueError, IndexError):
+        await message.answer("❌ Использование: /unblock [ID пользователя]")
+
+@router.message(F.text.startswith("/block "), admin_filter)
+async def block_user_command(message: Message):
+    """Заблокировать пользователя"""
+    try:
+        user_id = int(message.text.split()[1])
+        anti_spam.block_user(user_id, 0, "Заблокирован администратором")
+        await message.answer(f"🚫 Пользователь {user_id} заблокирован.")
+    except (ValueError, IndexError):
+        await message.answer("❌ Использование: /block [ID пользователя]")
+
+@router.message(F.text.startswith("/stats "), admin_filter)
+async def show_user_stats(message: Message):
+    """Показать статистику пользователя"""
+    try:
+        user_id = int(message.text.split()[1])
+        stats = anti_spam.get_user_stats(user_id)
+        
+        text = f"""📊 <b>Статистика пользователя {user_id}:</b>
+
+💬 Сообщений всего: {stats["message_count"]}
+🕐 За последний час: {stats["messages_last_hour"]}
+🎯 Спам-счет: {stats["spam_score"]}
+⚠️ Предупреждений: {stats["warning_count"]}
+
+🚫 Заблокирован: {"Да" if stats["is_blocked"] else "Нет"}"""
+        
+        if stats["remaining_block_time"] > 0:
+            text += f"\n⏰ Осталось: {stats['remaining_block_time']}с"
+        
+        await message.answer(text, parse_mode="HTML")
+        
+    except (ValueError, IndexError):
+        await message.answer("❌ Использование: /stats [ID пользователя]")
+
+@router.message(F.text == "/security", admin_filter)
+async def show_security_stats(message: Message):
+    """Показать статистику безопасности"""
+    try:
+        from security_monitor import security_monitor
+        stats = security_monitor.get_security_stats()
+        
+        text = f"""🛡️ <b>Статистика безопасности</b>
+
+📊 <b>За последний час:</b>
+• События: {stats["events_last_hour"]}
+• Блокировки: {stats["blocks_last_hour"]}
+• Сообщения: {stats["messages_last_hour"]}
+
+📈 <b>Общая статистика:</b>
+• Всего событий: {stats["total_events"]}
+• Заблокированных пользователей: {stats["unique_blocked_users"]}
+
+⚠️ <b>Серьезность событий:</b>
+• Низкая: {stats["severity_breakdown"]["low"]}
+• Средняя: {stats["severity_breakdown"]["medium"]}
+• Высокая: {stats["severity_breakdown"]["high"]}
+• Критическая: {stats["severity_breakdown"]["critical"]}
+
+Команды:
+/events - последние события
+/ddos - проверка DDoS
+/cleanup - очистка старых данных"""
+        
+        await message.answer(text, parse_mode="HTML")
+    except ImportError:
+        await message.answer("❌ Модуль мониторинга безопасности недоступен")
+
+@router.message(F.text == "/events", admin_filter)
+async def show_recent_events(message: Message):
+    """Показать последние события безопасности"""
+    try:
+        from security_monitor import security_monitor
+        events = security_monitor.get_recent_events(10)
+        
+        if not events:
+            await message.answer("📋 Последние события отсутствуют")
+            return
+        
+        text = "📋 <b>Последние события безопасности:</b>\n\n"
+        
+        for event in reversed(events[-10:]):  # Последние 10 событий
+            severity_emoji = {
+                "low": "🟢",
+                "medium": "🟡", 
+                "high": "🟠",
+                "critical": "🔴"
+            }
+            
+            time_str = time.strftime("%H:%M:%S", time.localtime(event.timestamp))
+            text += f"{severity_emoji.get(event.severity, '⚪')} <code>{time_str}</code> "
+            text += f"<b>{event.event_type}</b>\n"
+            text += f"👤 User: {event.user_id}\n"
+            text += f"📝 {event.details}\n\n"
+        
+        await message.answer(text, parse_mode="HTML")
+    except ImportError:
+        await message.answer("❌ Модуль мониторинга безопасности недоступен")
+
+@router.message(F.text == "/ddos", admin_filter)
+async def check_ddos(message: Message):
+    """Проверить активность на предмет DDoS"""
+    try:
+        from security_monitor import security_monitor
+        is_ddos = security_monitor.detect_ddos_attempt()
+        
+        if is_ddos:
+            text = "🚨 <b>ВНИМАНИЕ!</b> Обнаружена подозрительная активность!\n\n"
+            text += "Возможная DDoS атака или массовый спам.\n"
+            text += "Рекомендуется усилить защиту."
+        else:
+            text = "✅ <b>Система в норме</b>\n\n"
+            text += "Подозрительной активности не обнаружено."
+        
+        await message.answer(text, parse_mode="HTML")
+    except ImportError:
+        await message.answer("❌ Модуль мониторинга безопасности недоступен")
+
+@router.message(F.text == "/cleanup", admin_filter) 
+async def cleanup_security_data(message: Message):
+    """Очистить старые данные безопасности"""
+    try:
+        from security_monitor import security_monitor
+        security_monitor.cleanup_old_data()
+        await message.answer("✅ Старые данные безопасности очищены")
+    except ImportError:
+        await message.answer("❌ Модуль мониторинга безопасности недоступен")
+
+@router.message(F.text == "/topblocked", admin_filter)
+async def show_top_blocked(message: Message):
+    """Показать топ заблокированных пользователей"""
+    try:
+        from security_monitor import security_monitor
+        top_users = security_monitor.get_top_blocked_users(10)
+        
+        if not top_users:
+            await message.answer("📋 Нет заблокированных пользователей")
+            return
+        
+        text = "📊 <b>Топ заблокированных пользователей:</b>\n\n"
+        
+        for i, user_data in enumerate(top_users, 1):
+            text += f"{i}. 👤 ID: <code>{user_data['user_id']}</code>\n"
+            text += f"   🚫 Блокировок: {user_data['block_count']}\n\n"
+        
+        await message.answer(text, parse_mode="HTML")
+    except ImportError:
+        await message.answer("❌ Модуль мониторинга безопасности недоступен")
+

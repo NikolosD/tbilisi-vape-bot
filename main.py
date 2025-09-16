@@ -15,6 +15,8 @@ from keyboards import get_main_menu
 from handlers.user import router as user_router
 from handlers.admin import router as admin_router
 from i18n import _
+from middleware import AntiSpamMiddleware
+from anti_spam import anti_spam
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -24,6 +26,13 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
+
+# Настройка анти-спам системы
+anti_spam.set_admin_ids(ADMIN_IDS)
+
+# Подключение middleware
+dp.message.middleware(AntiSpamMiddleware())
+dp.callback_query.middleware(AntiSpamMiddleware())
 
 # Подключение роутеров
 dp.include_router(user_router)

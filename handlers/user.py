@@ -17,6 +17,10 @@ from keyboards import (
 )
 import i18n
 from i18n import _
+from button_filters import (
+    is_catalog_button, is_cart_button, is_orders_button, 
+    is_contact_button, is_info_button, is_language_button
+)
 
 router = Router()
 
@@ -27,7 +31,7 @@ class OrderStates(StatesGroup):
     waiting_payment_screenshot = State()
 
 # Обработчик текстовых сообщений из главного меню
-@router.message(F.text.in_(["🛍 Каталог", "🛍 Catalog"]))
+@router.message(is_catalog_button)
 async def show_catalog(message: Message):
     """Показать каталог категорий"""
     user_id = message.from_user.id
@@ -43,7 +47,7 @@ async def show_catalog(message: Message):
         parse_mode='HTML'
     )
 
-@router.message(F.text.in_(["🛒 Корзина", "🛒 Cart"]))
+@router.message(is_cart_button)
 async def show_cart(message: Message):
     """Показать корзину"""
     user_id = message.from_user.id
@@ -73,7 +77,7 @@ async def show_cart(message: Message):
         parse_mode='HTML'
     )
 
-@router.message(F.text.in_(["📋 Мои заказы", "📋 My Orders"]))
+@router.message(is_orders_button)
 async def show_orders(message: Message):
     """Показать заказы пользователя"""
     user_id = message.from_user.id
@@ -92,7 +96,7 @@ async def show_orders(message: Message):
         parse_mode='HTML'
     )
 
-@router.message(F.text.in_(["💬 Связь", "💬 Contact"]))
+@router.message(is_contact_button)
 async def show_contact(message: Message):
     """Показать контактную информацию"""
     contact_text = """💬 <b>Связь с нами</b>
@@ -111,17 +115,18 @@ async def show_contact(message: Message):
 
     await message.answer(contact_text, parse_mode='HTML')
 
+
 # Обработчик кнопки смены языка
-@router.message(F.text == "🌐 Язык")
+@router.message(is_language_button)
 async def show_language_selection(message: Message):
     """Показать выбор языка"""
     await message.answer(
         _("language.select", user_id=message.from_user.id),
-        reply_markup=get_language_keyboard(user_id=user_id),
+        reply_markup=get_language_keyboard(user_id=message.from_user.id),
         parse_mode='HTML'
     )
 
-@router.message(F.text.in_(["ℹ️ Информация", "ℹ️ Information"]))
+@router.message(is_info_button)
 async def show_info(message: Message):
     """Показать информацию о магазине"""
     info_text = """ℹ️ <b>Информация о магазине</b>
@@ -643,21 +648,52 @@ async def process_payment_screenshot(message: Message, state: FSMContext):
         parse_mode='HTML'
     )
     
-    # Уведомляем админов
-    from config import ADMIN_IDS
+    # Уведомляем админов с подробной информацией
+    from config import ADMIN_IDS, DELIVERY_ZONES
+    import json
     order = await db.get_order(order_id)
-    for admin_id in ADMIN_IDS:
-        try:
-            await message.bot.send_photo(
-                admin_id,
-                photo=photo_file_id,
-                caption=f"💰 <b>Скриншот оплаты заказа #{order_id}</b>\n\n"
-                        f"👤 Пользователь: {message.from_user.first_name} (@{message.from_user.username})\n"
-                        f"💰 Сумма: {order[3]}₾",
-                parse_mode='HTML'
-            )
-        except:
-            pass
+    
+    if order:
+        # Парсим продукты
+        products = json.loads(order[2])
+        
+        # Формируем подробное уведомление
+        admin_text = f"""💰 <b>Скриншот оплаты заказа #{order_id}</b>
+
+👤 <b>Клиент:</b>
+• Имя: {message.from_user.first_name or 'Не указано'}
+• Username: @{message.from_user.username or 'Не указано'}
+• ID: {message.from_user.id}
+
+📦 <b>Товары:</b>
+"""
+        
+        for product in products:
+            admin_text += f"• {product['name']} × {product['quantity']} = {product['price'] * product['quantity']}₾\n"
+        
+        # Информация о доставке
+        zone_info = DELIVERY_ZONES.get(order[4], {'name': 'Неизвестно'})
+        
+        admin_text += f"""
+🚚 <b>Доставка:</b> {zone_info['name']} - {order[5]}₾
+📍 <b>Адрес:</b> {order[7]}
+📱 <b>Телефон:</b> {order[6]}
+📅 <b>Дата:</b> {str(order[10])[:16]}
+
+💰 <b>Итого: {order[3]}₾</b>
+
+📊 <b>Статус:</b> 💰 Проверка оплаты"""
+        
+        for admin_id in ADMIN_IDS:
+            try:
+                await message.bot.send_photo(
+                    admin_id,
+                    photo=photo_file_id,
+                    caption=admin_text,
+                    parse_mode='HTML'
+                )
+            except:
+                pass
     
     await state.clear()
 
@@ -716,7 +752,6 @@ async def cancel_order(callback: CallbackQuery):
 async def show_order_details(callback: CallbackQuery):
     """Показать детали заказа"""
     order_id = int(callback.data.split("_")[1])
-    logger.info(f"Показываем детали заказа {order_id}")
     order = await db.get_order(order_id)
     
     if not order:
@@ -789,11 +824,8 @@ async def change_language(callback: CallbackQuery):
         "en": "English"
     }
     
-    # Показываем уведомление о смене языка
-    await callback.answer(
-        _("language.changed", user_id=user_id, language=language_names.get(language, language)),
-        show_alert=True
-    )
+    # Просто подтверждаем нажатие кнопки без уведомления
+    await callback.answer()
     
     # Обновляем главное меню с новым языком
     is_admin = user_id in ADMIN_IDS
@@ -811,12 +843,7 @@ async def change_language(callback: CallbackQuery):
             parse_mode='HTML'
         )
     
-    # Обновляем reply клавиатуру с переводами для нового языка
-    await callback.message.answer(
-        _("language.changed", user_id=user_id, language=language_names.get(language, language)),
-        reply_markup=get_main_menu(is_admin=is_admin, user_id=user_id),
-        parse_mode='HTML'
-    )
+    # Reply клавиатура обновится автоматически при следующем сообщении пользователя
 
 # Обработчики для inline кнопок главного меню
 @router.callback_query(F.data == "catalog")

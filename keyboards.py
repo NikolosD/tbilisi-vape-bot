@@ -39,7 +39,7 @@ def get_main_menu_inline(is_admin=False, user_id=None):
     contact_text = _("menu.contact", user_id=user_id)
     info_text = _("menu.info", user_id=user_id)
     language_text = _("menu.language", user_id=user_id)
-    admin_text = _("menu.admin", user_id=user_id)
+    admin_text = _("menu.admin_panel", user_id=user_id)
     
     keyboard = [
         [InlineKeyboardButton(text=catalog_text, callback_data="catalog")],
@@ -217,6 +217,7 @@ def get_admin_keyboard():
     keyboard = [
         [InlineKeyboardButton(text=_("admin.products"), callback_data="admin_products")],
         [InlineKeyboardButton(text=_("admin.orders"), callback_data="admin_orders")],
+        [InlineKeyboardButton(text=_("admin.all_orders"), callback_data="admin_all_orders")],
         [InlineKeyboardButton(text=_("admin.stats"), callback_data="admin_stats")],
         [InlineKeyboardButton(text=_("admin.broadcast"), callback_data="admin_broadcast")],
         [InlineKeyboardButton(text=_("common.main_menu"), callback_data="back_to_menu")]
@@ -282,9 +283,10 @@ def get_admin_orders_keyboard(orders):
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # Действия с заказом (админ)
-def get_admin_order_actions_keyboard(order_id, status):
+def get_admin_order_actions_keyboard(order_id, status, from_all_orders=False):
     keyboard = []
     
+    # Основные действия в зависимости от статуса
     if status == 'payment_check':
         keyboard.append([InlineKeyboardButton(text=_("admin_actions.confirm_payment"), callback_data=f"admin_confirm_payment_{order_id}")])
         keyboard.append([InlineKeyboardButton(text=_("admin_actions.reject_payment"), callback_data=f"admin_reject_payment_{order_id}")])
@@ -293,9 +295,33 @@ def get_admin_order_actions_keyboard(order_id, status):
     elif status == 'shipping':
         keyboard.append([InlineKeyboardButton(text=_("admin_actions.mark_delivered"), callback_data=f"admin_deliver_{order_id}")])
     
-    keyboard.append([InlineKeyboardButton(text=_("admin_actions.cancel_order"), callback_data=f"admin_cancel_{order_id}")])
-    keyboard.append([InlineKeyboardButton(text=_("common.to_orders_admin"), callback_data="admin_orders")])
+    # Действия доступные всегда (для исправления ошибок)
+    if status != 'cancelled':
+        keyboard.append([InlineKeyboardButton(text=_("admin_actions.cancel_order"), callback_data=f"admin_cancel_{order_id}")])
     
+    # Возможность изменить статус вручную для завершенных заказов
+    if status in ['delivered', 'cancelled']:
+        keyboard.append([InlineKeyboardButton(text=_("admin_actions.change_status"), callback_data=f"admin_change_status_{order_id}")])
+    
+    # Кнопка возврата
+    if from_all_orders:
+        keyboard.append([InlineKeyboardButton(text=_("common.to_all_orders"), callback_data="admin_all_orders")])
+    else:
+        keyboard.append([InlineKeyboardButton(text=_("common.to_orders_admin"), callback_data="admin_orders")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+# Клавиатура для смены статуса заказа
+def get_change_status_keyboard(order_id):
+    keyboard = [
+        [InlineKeyboardButton(text="⏳ Ожидает оплаты", callback_data=f"set_status_waiting_payment_{order_id}")],
+        [InlineKeyboardButton(text="💰 Проверка оплаты", callback_data=f"set_status_payment_check_{order_id}")],
+        [InlineKeyboardButton(text="✅ Оплачен", callback_data=f"set_status_paid_{order_id}")],
+        [InlineKeyboardButton(text="🚚 Отправлен", callback_data=f"set_status_shipping_{order_id}")],
+        [InlineKeyboardButton(text="✅ Доставлен", callback_data=f"set_status_delivered_{order_id}")],
+        [InlineKeyboardButton(text="❌ Отменен", callback_data=f"set_status_cancelled_{order_id}")],
+        [InlineKeyboardButton(text=_("common.back"), callback_data=f"admin_order_{order_id}")]
+    ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # Выбор языка
