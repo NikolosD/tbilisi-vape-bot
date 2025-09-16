@@ -183,16 +183,17 @@ async def show_product(callback: CallbackQuery):
     
     if product[4]:  # Если есть фото
         try:
-            await callback.message.edit_media(
-                media=callback.message.photo[0].file_id,
-                reply_markup=keyboard
-            )
-            await callback.message.edit_caption(
+            # Удаляем старое сообщение и отправляем новое с фото
+            await callback.message.delete()
+            await callback.bot.send_photo(
+                chat_id=callback.from_user.id,
+                photo=product[4],
                 caption=product_text,
                 reply_markup=keyboard,
                 parse_mode='HTML'
             )
-        except:
+        except Exception as e:
+            # Если не удалось отправить фото, отправляем текст
             await callback.message.edit_text(
                 product_text,
                 reply_markup=keyboard,
