@@ -442,8 +442,18 @@ async def process_address(message: Message, state: FSMContext):
     address = message.text
     user_id = message.from_user.id
     
+    # Отладочная информация
+    print(f"DEBUG: Получен адрес: {address} от пользователя {user_id}")
+    
     # Получаем данные из состояния
     data = await state.get_data()
+    print(f"DEBUG: Данные состояния: {data}")
+    
+    if 'delivery_zone' not in data:
+        await message.answer("❌ Ошибка: данные заказа потеряны. Начните заказ заново.")
+        await state.clear()
+        return
+        
     zone_id = data['delivery_zone']
     zone_info = DELIVERY_ZONES[zone_id]
     
@@ -473,15 +483,22 @@ async def process_address(message: Message, state: FSMContext):
         })
     
     # Создаем заказ
-    order_id = await db.create_order(
-        user_id=user_id,
-        products=products_data,
-        total_price=total_price,
-        delivery_zone=zone_id,
-        delivery_price=delivery_price,
-        phone=phone,
-        address=address
-    )
+    try:
+        order_id = await db.create_order(
+            user_id=user_id,
+            products=products_data,
+            total_price=total_price,
+            delivery_zone=zone_id,
+            delivery_price=delivery_price,
+            phone=phone,
+            address=address
+        )
+        print(f"DEBUG: Заказ создан с ID: {order_id}")
+    except Exception as e:
+        print(f"DEBUG: Ошибка создания заказа: {e}")
+        await message.answer("❌ Ошибка при создании заказа. Попробуйте еще раз.")
+        await state.clear()
+        return
     
     # Очищаем корзину
     await db.clear_cart(user_id)
