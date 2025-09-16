@@ -56,6 +56,138 @@ async def admin_products_menu(callback: CallbackQuery):
         parse_mode='HTML'
     )
 
+@router.callback_query(F.data == "admin_edit_products", admin_filter)
+async def admin_edit_products(callback: CallbackQuery):
+    """Показать список товаров для редактирования"""
+    products = await db.get_products()
+    
+    if not products:
+        await callback.message.edit_text(
+            "📦 <b>Товары отсутствуют</b>\n\n"
+            "Сначала добавьте товары через меню.",
+            reply_markup=get_admin_products_keyboard(),
+            parse_mode='HTML'
+        )
+        return
+    
+    keyboard = []
+    for product in products:
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"✏️ {product[1]} - {product[2]}₾",
+                callback_data=f"edit_product_{product[0]}"
+            )
+        ])
+    
+    keyboard.append([InlineKeyboardButton(text="🔙 Управление товарами", callback_data="admin_products")])
+    
+    await callback.message.edit_text(
+        "📝 <b>Редактировать товары</b>\n\n"
+        "Выберите товар для редактирования:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode='HTML'
+    )
+
+@router.callback_query(F.data.startswith("edit_product_"), admin_filter)
+async def edit_product_menu(callback: CallbackQuery):
+    """Меню редактирования товара"""
+    product_id = int(callback.data.split("_")[2])
+    product = await db.get_product(product_id)
+    
+    if not product:
+        await callback.answer("❌ Товар не найден", show_alert=True)
+        return
+    
+    keyboard = [
+        [InlineKeyboardButton(text="🗑 Удалить товар", callback_data=f"delete_product_{product_id}")],
+        [InlineKeyboardButton(text="📦 Скрыть/Показать", callback_data=f"toggle_stock_{product_id}")],
+        [InlineKeyboardButton(text="🔙 Список товаров", callback_data="admin_edit_products")]
+    ]
+    
+    stock_status = "✅ В наличии" if product[6] else "❌ Скрыт"
+    
+    await callback.message.edit_text(
+        f"✏️ <b>Редактирование товара</b>\n\n"
+        f"📝 <b>Название:</b> {product[1]}\n"
+        f"💰 <b>Цена:</b> {product[2]}₾\n"
+        f"📋 <b>Описание:</b> {product[3] or 'Нет описания'}\n"
+        f"📦 <b>Статус:</b> {stock_status}\n\n"
+        f"Выберите действие:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode='HTML'
+    )
+
+@router.callback_query(F.data.startswith("delete_product_"), admin_filter)
+async def confirm_delete_product(callback: CallbackQuery):
+    """Подтверждение удаления товара"""
+    product_id = int(callback.data.split("_")[2])
+    
+    keyboard = [
+        [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"confirm_delete_{product_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"edit_product_{product_id}")]
+    ]
+    
+    await callback.message.edit_text(
+        "🗑 <b>Удаление товара</b>\n\n"
+        "⚠️ Вы уверены, что хотите удалить этот товар?\n"
+        "Это действие нельзя отменить!",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode='HTML'
+    )
+
+@router.callback_query(F.data.startswith("confirm_delete_"), admin_filter)
+async def delete_product(callback: CallbackQuery):
+    """Удаление товара"""
+    product_id = int(callback.data.split("_")[2])
+    
+    await db.execute("DELETE FROM products WHERE id = $1", product_id)
+    
+    await callback.message.edit_text(
+        "✅ <b>Товар удален!</b>\n\n"
+        "Товар успешно удален из каталога.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Управление товарами", callback_data="admin_products")]
+        ]),
+        parse_mode='HTML'
+    )
+
+@router.callback_query(F.data.startswith("toggle_stock_"), admin_filter)
+async def toggle_product_stock(callback: CallbackQuery):
+    """Переключение наличия товара"""
+    product_id = int(callback.data.split("_")[2])
+    product = await db.get_product(product_id)
+    
+    if not product:
+        await callback.answer("❌ Товар не найден", show_alert=True)
+        return
+    
+    new_stock = not product[6]  # Инвертируем статус
+    await db.update_product_stock(product_id, new_stock)
+    
+    status_text = "показан в каталоге" if new_stock else "скрыт из каталога"
+    
+    await callback.answer(f"✅ Товар {status_text}!", show_alert=True)
+    
+    # Обновляем меню редактирования
+    keyboard = [
+        [InlineKeyboardButton(text="🗑 Удалить товар", callback_data=f"delete_product_{product_id}")],
+        [InlineKeyboardButton(text="📦 Скрыть/Показать", callback_data=f"toggle_stock_{product_id}")],
+        [InlineKeyboardButton(text="🔙 Список товаров", callback_data="admin_edit_products")]
+    ]
+    
+    stock_status = "✅ В наличии" if new_stock else "❌ Скрыт"
+    
+    await callback.message.edit_text(
+        f"✏️ <b>Редактирование товара</b>\n\n"
+        f"📝 <b>Название:</b> {product[1]}\n"
+        f"💰 <b>Цена:</b> {product[2]}₾\n"
+        f"📋 <b>Описание:</b> {product[3] or 'Нет описания'}\n"
+        f"📦 <b>Статус:</b> {stock_status}\n\n"
+        f"Выберите действие:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode='HTML'
+    )
+
 @router.callback_query(F.data == "admin_add_product", admin_filter)
 async def start_add_product(callback: CallbackQuery, state: FSMContext):
     """Начать добавление товара"""
