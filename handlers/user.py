@@ -551,9 +551,6 @@ async def process_address(message: Message, state: FSMContext):
 💳 Карта: {PAYMENT_INFO['card']}
 📱 СБП: {PAYMENT_INFO['sbp_phone']}
 
-❗ <b>Обязательно укажите в комментарии:</b>
-<code>Заказ #{order_id}</code>
-
 После оплаты нажмите кнопку "Оплатил(а)" и пришлите скриншот."""
     
     await message.answer(
@@ -647,6 +644,38 @@ async def show_my_orders(callback: CallbackQuery):
     await callback.message.edit_text(
         "📋 <b>Ваши заказы:</b>\n\nВыберите заказ для просмотра деталей:",
         reply_markup=get_orders_keyboard(orders),
+        parse_mode='HTML'
+    )
+
+@router.callback_query(F.data.startswith("cancel_order_"))
+async def cancel_order(callback: CallbackQuery):
+    """Отменить заказ пользователем"""
+    order_id = int(callback.data.split("_")[2])
+    user_id = callback.from_user.id
+    
+    # Проверяем, что заказ принадлежит пользователю
+    order = await db.get_order(order_id)
+    if not order or order[1] != user_id:
+        await callback.answer("❌ Заказ не найден", show_alert=True)
+        return
+    
+    # Проверяем, что заказ можно отменить (только ожидающие оплату)
+    if order[8] not in ['waiting_payment', 'payment_check']:
+        await callback.answer("❌ Заказ нельзя отменить", show_alert=True)
+        return
+    
+    # Отменяем заказ
+    await db.update_order_status(order_id, 'cancelled')
+    
+    await callback.answer("✅ Заказ отменен", show_alert=True)
+    
+    # Обновляем сообщение
+    await callback.message.edit_text(
+        "❌ <b>Заказ отменен</b>\n\n"
+        f"Заказ #{order_id} был отменен.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_menu")]
+        ]),
         parse_mode='HTML'
     )
 

@@ -192,9 +192,14 @@ async def toggle_product_stock(callback: CallbackQuery):
 @router.callback_query(F.data == "admin_add_product", admin_filter)
 async def start_add_product(callback: CallbackQuery, state: FSMContext):
     """Начать добавление товара"""
+    keyboard = [
+        [InlineKeyboardButton(text="🔙 Управление товарами", callback_data="admin_products")]
+    ]
+    
     await callback.message.edit_text(
         "➕ <b>Добавление товара</b>\n\n"
         "Напишите название товара:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         parse_mode='HTML'
     )
     await state.set_state(AdminStates.waiting_product_name)
@@ -600,9 +605,14 @@ async def show_stats(callback: CallbackQuery):
 @router.callback_query(F.data == "admin_broadcast", admin_filter)
 async def start_broadcast(callback: CallbackQuery, state: FSMContext):
     """Начать рассылку"""
+    keyboard = [
+        [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")]
+    ]
+    
     await callback.message.edit_text(
         "📢 <b>Рассылка сообщений</b>\n\n"
         "Напишите сообщение для рассылки всем пользователям:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         parse_mode='HTML'
     )
     await state.set_state(AdminStates.waiting_broadcast_message)

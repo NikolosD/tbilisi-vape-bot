@@ -154,7 +154,7 @@ class Database:
     
     async def get_pending_orders(self):
         """Получение заказов ожидающих обработки"""
-        query = "SELECT * FROM orders WHERE status IN ('waiting_payment', 'payment_check') ORDER BY created_at"
+        query = "SELECT * FROM orders WHERE status IN ('waiting_payment', 'payment_check', 'paid', 'shipping') ORDER BY created_at"
         return await self.fetchall(query)
 
 
