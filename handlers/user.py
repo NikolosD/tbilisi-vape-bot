@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 import json
 
 from database import db
-from config import DELIVERY_ZONES, MIN_ORDER_AMOUNT, PAYMENT_INFO
+from config import DELIVERY_ZONES, MIN_ORDER_AMOUNT, PAYMENT_INFO, ADMIN_IDS
 from keyboards import (
     get_main_menu, get_catalog_keyboard, get_product_card_keyboard,
     get_cart_keyboard, get_delivery_zones_keyboard, get_order_confirmation_keyboard,
@@ -424,13 +424,14 @@ async def process_contact(message: Message, state: FSMContext):
     zone_id = data['delivery_zone']
     zone_info = DELIVERY_ZONES[zone_id]
     
+    is_admin = user_id in ADMIN_IDS
     await message.answer(
         f"📍 <b>Укажите адрес доставки</b>\n\n"
         f"🚚 Зона: {zone_info['name']}\n"
         f"💰 Стоимость доставки: {zone_info['price']}₾\n"
         f"⏱ Время доставки: {zone_info['time']}\n\n"
         f"Напишите точный адрес доставки:",
-        reply_markup=get_main_menu(),
+        reply_markup=get_main_menu(is_admin=is_admin),
         parse_mode='HTML'
     )
     await state.set_state(OrderStates.waiting_address)
@@ -656,10 +657,13 @@ async def show_order_details(callback: CallbackQuery):
 @router.callback_query(F.data == "back_to_menu")
 async def back_to_menu(callback: CallbackQuery):
     """Вернуться в главное меню"""
+    user_id = callback.from_user.id
+    is_admin = user_id in ADMIN_IDS
+    
     await callback.message.delete()
     await callback.message.answer(
         "🏠 <b>Главное меню</b>\n\nВыберите действие:",
-        reply_markup=get_main_menu(),
+        reply_markup=get_main_menu(is_admin=is_admin),
         parse_mode='HTML'
     )
 

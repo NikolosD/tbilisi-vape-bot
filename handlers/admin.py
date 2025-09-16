@@ -553,7 +553,7 @@ async def show_stats(callback: CallbackQuery):
     # Получаем данные для статистики
     all_orders = await db.fetchall("SELECT status FROM orders")
     users_count = (await db.fetchone("SELECT COUNT(*) FROM users"))[0]
-    products_count = (await db.fetchone("SELECT COUNT(*) FROM products WHERE in_stock = 1"))[0]
+    products_count = (await db.fetchone("SELECT COUNT(*) FROM products WHERE in_stock = true"))[0]
     
     # Подсчитываем заказы по статусам
     status_counts = {

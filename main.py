@@ -2,7 +2,7 @@ import asyncio
 import logging
 import signal
 import sys
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -38,6 +38,9 @@ async def cmd_start(message: Message):
     # Добавляем пользователя в базу данных
     db.add_user(user_id, username, first_name)
     
+    # Проверяем, является ли пользователь администратором
+    is_admin = user_id in ADMIN_IDS
+    
     welcome_text = """🔥 <b>Добро пожаловать в Tbilisi VAPE Shop!</b>
 
 🚬 Лучшие одноразовые электронные сигареты в Тбилиси
@@ -49,7 +52,7 @@ async def cmd_start(message: Message):
     
     await message.answer(
         welcome_text,
-        reply_markup=get_main_menu(),
+        reply_markup=get_main_menu(is_admin=is_admin),
         parse_mode='HTML'
     )
 
@@ -69,6 +72,31 @@ async def cmd_admin(message: Message):
             user_id=user_id,
             username=message.from_user.username,
             first_name=message.from_user.first_name
+        )
+    
+    from keyboards import get_admin_keyboard
+    await message.answer(
+        "🔧 <b>Админ-панель</b>\n\nВыберите действие:",
+        reply_markup=get_admin_keyboard(),
+        parse_mode='HTML'
+    )
+
+@dp.message(F.text == "🔧 Админ панель")
+async def admin_panel_button(message: Message):
+    """Обработчик кнопки 'Админ панель' в главном меню"""
+    user_id = message.from_user.id
+    
+    if user_id not in ADMIN_IDS:
+        await message.answer("❌ У вас нет доступа к админ-панели")
+        return
+    
+    # Убеждаемся, что пользователь существует в базе
+    user = await db.get_user(user_id)
+    if not user:
+        await db.add_user(
+            user_id, 
+            message.from_user.username, 
+            message.from_user.first_name
         )
     
     from keyboards import get_admin_keyboard

@@ -1,13 +1,19 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 # Главное меню
-def get_main_menu():
+def get_main_menu(is_admin=False):
+    keyboard_rows = [
+        [KeyboardButton(text="🛍 Каталог"), KeyboardButton(text="🛒 Корзина")],
+        [KeyboardButton(text="📋 Мои заказы"), KeyboardButton(text="💬 Связь")],
+        [KeyboardButton(text="ℹ️ Информация")]
+    ]
+    
+    # Добавляем кнопку админ-панели только для администраторов
+    if is_admin:
+        keyboard_rows.append([KeyboardButton(text="🔧 Админ панель")])
+    
     keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🛍 Каталог"), KeyboardButton(text="🛒 Корзина")],
-            [KeyboardButton(text="📋 Мои заказы"), KeyboardButton(text="💬 Связь")],
-            [KeyboardButton(text="ℹ️ Информация")]
-        ],
+        keyboard=keyboard_rows,
         resize_keyboard=True,
         persistent=True
     )
@@ -161,7 +167,8 @@ def get_admin_keyboard():
         [InlineKeyboardButton(text="📦 Управление товарами", callback_data="admin_products")],
         [InlineKeyboardButton(text="📋 Новые заказы", callback_data="admin_orders")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
-        [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")]
+        [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_menu")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
