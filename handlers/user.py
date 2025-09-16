@@ -297,7 +297,7 @@ async def cart_remove(callback: CallbackQuery):
     user_id = callback.from_user.id
     
     product = await db.get_product(product_id)
-    db.remove_from_cart(user_id, product_id)
+    await db.remove_from_cart(user_id, product_id)
     
     await callback.answer(f"🗑 {product[1]} удален из корзины")
     
@@ -744,18 +744,4 @@ async def back_to_menu(callback: CallbackQuery):
 @router.callback_query(F.data == "cart")
 async def callback_cart(callback: CallbackQuery):
     """Показать корзину через callback"""
-    await update_cart_display(callback)
-
-@router.callback_query(F.data.startswith("cart_remove_"))
-async def remove_from_cart(callback: CallbackQuery):
-    """Удалить товар из корзины"""
-    product_id = int(callback.data.split("_")[2])
-    user_id = callback.from_user.id
-    
-    # Удаляем товар из корзины
-    await db.remove_from_cart(user_id, product_id)
-    
-    await callback.answer("✅ Товар удален из корзины")
-    
-    # Обновляем отображение корзины
     await update_cart_display(callback)
