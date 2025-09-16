@@ -24,7 +24,7 @@ class OrderStates(StatesGroup):
 @router.message(F.text == "🛍 Каталог")
 async def show_catalog(message: Message):
     """Показать каталог товаров"""
-    products = db.get_products()
+    products = await db.get_products()
     
     if not products:
         await message.answer("📦 Каталог пока пуст. Скоро добавим товары!")
@@ -40,7 +40,7 @@ async def show_catalog(message: Message):
 async def show_cart(message: Message):
     """Показать корзину"""
     user_id = message.from_user.id
-    cart_items = db.get_cart(user_id)
+    cart_items = await db.get_cart(user_id)
     
     if not cart_items:
         await message.answer(
@@ -70,7 +70,7 @@ async def show_cart(message: Message):
 async def show_orders(message: Message):
     """Показать заказы пользователя"""
     user_id = message.from_user.id
-    orders = db.get_user_orders(user_id)
+    orders = await db.get_user_orders(user_id)
     
     if not orders:
         await message.answer(
@@ -143,7 +143,7 @@ async def show_info(message: Message):
 @router.callback_query(F.data == "catalog")
 async def callback_catalog(callback: CallbackQuery):
     """Показать каталог через callback"""
-    products = db.get_products()
+    products = await db.get_products()
     
     if not products:
         await callback.message.edit_text("📦 Каталог пока пуст. Скоро добавим товары!")
@@ -159,7 +159,7 @@ async def callback_catalog(callback: CallbackQuery):
 async def show_product(callback: CallbackQuery):
     """Показать карточку товара"""
     product_id = int(callback.data.split("_")[1])
-    product = db.get_product(product_id)
+    product = await db.get_product(product_id)
     
     if not product:
         await callback.answer("❌ Товар не найден", show_alert=True)
@@ -167,7 +167,7 @@ async def show_product(callback: CallbackQuery):
     
     # Проверяем, есть ли товар в корзине
     user_id = callback.from_user.id
-    cart_items = db.get_cart(user_id)
+    cart_items = await db.get_cart(user_id)
     in_cart = any(item[0] == product_id for item in cart_items)
     
     product_text = f"""🛍 <b>{product[1]}</b>
@@ -212,13 +212,13 @@ async def add_to_cart(callback: CallbackQuery):
     user_id = callback.from_user.id
     
     # Проверяем существование товара
-    product = db.get_product(product_id)
+    product = await db.get_product(product_id)
     if not product or product[6] == 0:  # Если товара нет в наличии
         await callback.answer("❌ Товара нет в наличии", show_alert=True)
         return
     
     # Добавляем в корзину
-    db.add_to_cart(user_id, product_id, 1)
+    await db.add_to_cart(user_id, product_id, 1)
     
     await callback.answer(f"✅ {product[1]} добавлен в корзину!")
     
@@ -233,7 +233,7 @@ async def cart_increase(callback: CallbackQuery):
     user_id = callback.from_user.id
     
     # Получаем текущее количество
-    cart_items = db.get_cart(user_id)
+    cart_items = await db.get_cart(user_id)
     current_quantity = 0
     for item in cart_items:
         if item[0] == product_id:
@@ -241,7 +241,7 @@ async def cart_increase(callback: CallbackQuery):
             break
     
     new_quantity = current_quantity + 1
-    db.update_cart_quantity(user_id, product_id, new_quantity)
+    await db.update_cart_quantity(user_id, product_id, new_quantity)
     
     await callback.answer(f"✅ Количество увеличено до {new_quantity}")
     
@@ -256,7 +256,7 @@ async def cart_decrease(callback: CallbackQuery):
     user_id = callback.from_user.id
     
     # Получаем текущее количество
-    cart_items = db.get_cart(user_id)
+    cart_items = await db.get_cart(user_id)
     current_quantity = 0
     for item in cart_items:
         if item[0] == product_id:
@@ -264,11 +264,11 @@ async def cart_decrease(callback: CallbackQuery):
             break
     
     if current_quantity <= 1:
-        db.remove_from_cart(user_id, product_id)
+        await db.remove_from_cart(user_id, product_id)
         await callback.answer("🗑 Товар удален из корзины")
     else:
         new_quantity = current_quantity - 1
-        db.update_cart_quantity(user_id, product_id, new_quantity)
+        await db.update_cart_quantity(user_id, product_id, new_quantity)
         await callback.answer(f"✅ Количество уменьшено до {new_quantity}")
     
     # Обновляем корзину если мы на странице корзины
@@ -281,7 +281,7 @@ async def cart_remove(callback: CallbackQuery):
     product_id = int(callback.data.split("_")[2])
     user_id = callback.from_user.id
     
-    product = db.get_product(product_id)
+    product = await db.get_product(product_id)
     db.remove_from_cart(user_id, product_id)
     
     await callback.answer(f"🗑 {product[1]} удален из корзины")
@@ -297,7 +297,7 @@ async def cart_remove(callback: CallbackQuery):
 async def update_cart_display(callback: CallbackQuery):
     """Обновить отображение корзины"""
     user_id = callback.from_user.id
-    cart_items = db.get_cart(user_id)
+    cart_items = await db.get_cart(user_id)
     
     if not cart_items:
         await callback.message.edit_text(
@@ -327,7 +327,7 @@ async def update_cart_display(callback: CallbackQuery):
 async def clear_cart(callback: CallbackQuery):
     """Очистить корзину"""
     user_id = callback.from_user.id
-    db.clear_cart(user_id)
+    await db.clear_cart(user_id)
     
     await callback.message.edit_text(
         "🗑 <b>Корзина очищена</b>\n\nДобавьте товары из каталога!",
@@ -338,7 +338,7 @@ async def clear_cart(callback: CallbackQuery):
 async def start_checkout(callback: CallbackQuery, state: FSMContext):
     """Начать оформление заказа"""
     user_id = callback.from_user.id
-    cart_items = db.get_cart(user_id)
+    cart_items = await db.get_cart(user_id)
     
     if not cart_items:
         await callback.answer("❌ Корзина пуста!", show_alert=True)
@@ -371,7 +371,7 @@ async def select_delivery(callback: CallbackQuery, state: FSMContext):
     
     # Проверяем контактные данные пользователя
     user_id = callback.from_user.id
-    user = db.get_user(user_id)
+    user = await db.get_user(user_id)
     
     if not user[3]:  # Если нет номера телефона
         # Удаляем сообщение и отправляем новое с ReplyKeyboard
@@ -407,7 +407,7 @@ async def process_contact(message: Message, state: FSMContext):
     user_id = message.from_user.id
     
     # Сохраняем номер телефона
-    db.update_user_contact(user_id, contact.phone_number, "")
+    await db.update_user_contact(user_id, contact.phone_number, "")
     
     data = await state.get_data()
     zone_id = data['delivery_zone']
@@ -436,8 +436,8 @@ async def process_address(message: Message, state: FSMContext):
     zone_info = DELIVERY_ZONES[zone_id]
     
     # Получаем корзину и пользователя
-    cart_items = db.get_cart(user_id)
-    user = db.get_user(user_id)
+    cart_items = await db.get_cart(user_id)
+    user = await db.get_user(user_id)
     phone = user[3]
     
     if not cart_items:
@@ -461,7 +461,7 @@ async def process_address(message: Message, state: FSMContext):
         })
     
     # Создаем заказ
-    order_id = db.create_order(
+    order_id = await db.create_order(
         user_id=user_id,
         products=products_data,
         total_price=total_price,
@@ -472,7 +472,7 @@ async def process_address(message: Message, state: FSMContext):
     )
     
     # Очищаем корзину
-    db.clear_cart(user_id)
+    await db.clear_cart(user_id)
     
     # Формируем детали заказа
     order_text = f"""✅ <b>Заказ #{order_id} создан!</b>
@@ -546,8 +546,8 @@ async def process_payment_screenshot(message: Message, state: FSMContext):
     
     # Сохраняем file_id скриншота
     photo_file_id = message.photo[-1].file_id
-    db.update_order_screenshot(order_id, photo_file_id)
-    db.update_order_status(order_id, 'payment_check')
+    await db.update_order_screenshot(order_id, photo_file_id)
+    await db.update_order_status(order_id, 'payment_check')
     
     await message.answer(
         f"✅ <b>Скриншот получен!</b>\n\n"
@@ -559,7 +559,7 @@ async def process_payment_screenshot(message: Message, state: FSMContext):
     
     # Уведомляем админов
     from config import ADMIN_IDS
-    order = db.get_order(order_id)
+    order = await db.get_order(order_id)
     for admin_id in ADMIN_IDS:
         try:
             await message.bot.send_photo(
@@ -579,7 +579,7 @@ async def process_payment_screenshot(message: Message, state: FSMContext):
 async def show_my_orders(callback: CallbackQuery):
     """Показать заказы пользователя"""
     user_id = callback.from_user.id
-    orders = db.get_user_orders(user_id)
+    orders = await db.get_user_orders(user_id)
     
     if not orders:
         await callback.message.edit_text(
@@ -598,7 +598,7 @@ async def show_my_orders(callback: CallbackQuery):
 async def show_order_details(callback: CallbackQuery):
     """Показать детали заказа"""
     order_id = int(callback.data.split("_")[1])
-    order = db.get_order(order_id)
+    order = await db.get_order(order_id)
     
     if not order:
         await callback.answer("❌ Заказ не найден", show_alert=True)

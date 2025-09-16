@@ -31,13 +31,13 @@ def admin_filter(message_or_callback):
 @router.callback_query(F.data == "admin_panel", admin_filter)
 async def show_admin_panel(callback: CallbackQuery):
     """Показать админ панель"""
-    pending_orders = db.get_pending_orders()
+    pending_orders = await db.get_pending_orders()
     
     await callback.message.edit_text(
         f"🔧 <b>Админ-панель</b>\n\n"
         f"📊 <b>Статистика:</b>\n"
         f"🆕 Новых заказов: {len(pending_orders)}\n"
-        f"📦 Товаров в каталоге: {len(db.get_products())}\n\n"
+        f"📦 Товаров в каталоге: {len(await db.get_products())}\n\n"
         f"Выберите действие:",
         reply_markup=get_admin_keyboard(),
         parse_mode='HTML'
@@ -47,7 +47,7 @@ async def show_admin_panel(callback: CallbackQuery):
 @router.callback_query(F.data == "admin_products", admin_filter)
 async def admin_products_menu(callback: CallbackQuery):
     """Меню управления товарами"""
-    products = db.get_products()
+    products = await db.get_products()
     
     await callback.message.edit_text(
         f"📦 <b>Управление товарами</b>\n\n"
@@ -124,7 +124,7 @@ async def process_product_photo(message: Message, state: FSMContext):
     data = await state.get_data()
     
     # Добавляем товар в базу
-    db.add_product(
+    await db.add_product(
         name=data['name'],
         price=data['price'],
         description=data['description'],
@@ -148,7 +148,7 @@ async def process_product_no_photo(message: Message, state: FSMContext):
     data = await state.get_data()
     
     # Добавляем товар в базу без фото
-    db.add_product(
+    await db.add_product(
         name=data['name'],
         price=data['price'],
         description=data['description'],
@@ -170,7 +170,7 @@ async def process_product_no_photo(message: Message, state: FSMContext):
 @router.callback_query(F.data == "admin_orders", admin_filter)
 async def admin_orders_menu(callback: CallbackQuery):
     """Меню заказов для админа"""
-    orders = db.get_pending_orders()
+    orders = await db.get_pending_orders()
     
     if not orders:
         await callback.message.edit_text(
@@ -193,7 +193,7 @@ async def admin_orders_menu(callback: CallbackQuery):
 async def show_admin_order(callback: CallbackQuery):
     """Показать детали заказа для админа"""
     order_id = int(callback.data.split("_")[2])
-    order = db.get_order(order_id)
+    order = await db.get_order(order_id)
     
     if not order:
         await callback.answer("❌ Заказ не найден", show_alert=True)
@@ -201,7 +201,7 @@ async def show_admin_order(callback: CallbackQuery):
     
     # Парсим продукты
     products = json.loads(order[2])
-    user = db.get_user(order[1])
+    user = await db.get_user(order[1])
     
     status_text = {
         'waiting_payment': '⏳ Ожидает оплаты',
@@ -265,14 +265,14 @@ async def show_admin_order(callback: CallbackQuery):
 async def confirm_payment(callback: CallbackQuery):
     """Подтвердить оплату заказа"""
     order_id = int(callback.data.split("_")[3])
-    order = db.get_order(order_id)
+    order = await db.get_order(order_id)
     
     if not order:
         await callback.answer("❌ Заказ не найден", show_alert=True)
         return
     
     # Обновляем статус
-    db.update_order_status(order_id, 'paid')
+    await db.update_order_status(order_id, 'paid')
     
     # Уведомляем клиента
     try:
@@ -295,14 +295,14 @@ async def confirm_payment(callback: CallbackQuery):
 async def reject_payment(callback: CallbackQuery):
     """Отклонить оплату заказа"""
     order_id = int(callback.data.split("_")[3])
-    order = db.get_order(order_id)
+    order = await db.get_order(order_id)
     
     if not order:
         await callback.answer("❌ Заказ не найден", show_alert=True)
         return
     
     # Возвращаем статус
-    db.update_order_status(order_id, 'waiting_payment')
+    await db.update_order_status(order_id, 'waiting_payment')
     
     # Уведомляем клиента
     try:
@@ -325,14 +325,14 @@ async def reject_payment(callback: CallbackQuery):
 async def ship_order(callback: CallbackQuery):
     """Отметить заказ как отправленный"""
     order_id = int(callback.data.split("_")[2])
-    order = db.get_order(order_id)
+    order = await db.get_order(order_id)
     
     if not order:
         await callback.answer("❌ Заказ не найден", show_alert=True)
         return
     
     # Обновляем статус
-    db.update_order_status(order_id, 'shipping')
+    await db.update_order_status(order_id, 'shipping')
     
     # Уведомляем клиента
     try:
@@ -356,14 +356,14 @@ async def ship_order(callback: CallbackQuery):
 async def deliver_order(callback: CallbackQuery):
     """Отметить заказ как доставленный"""
     order_id = int(callback.data.split("_")[2])
-    order = db.get_order(order_id)
+    order = await db.get_order(order_id)
     
     if not order:
         await callback.answer("❌ Заказ не найден", show_alert=True)
         return
     
     # Обновляем статус
-    db.update_order_status(order_id, 'delivered')
+    await db.update_order_status(order_id, 'delivered')
     
     # Уведомляем клиента
     try:
@@ -387,14 +387,14 @@ async def deliver_order(callback: CallbackQuery):
 async def cancel_order(callback: CallbackQuery):
     """Отменить заказ"""
     order_id = int(callback.data.split("_")[2])
-    order = db.get_order(order_id)
+    order = await db.get_order(order_id)
     
     if not order:
         await callback.answer("❌ Заказ не найден", show_alert=True)
         return
     
     # Обновляем статус
-    db.update_order_status(order_id, 'cancelled')
+    await db.update_order_status(order_id, 'cancelled')
     
     # Уведомляем клиента
     try:
@@ -418,9 +418,9 @@ async def cancel_order(callback: CallbackQuery):
 async def show_stats(callback: CallbackQuery):
     """Показать статистику"""
     # Получаем данные для статистики
-    all_orders = db.fetchall("SELECT status FROM orders")
-    users_count = db.fetchone("SELECT COUNT(*) FROM users")[0]
-    products_count = db.fetchone("SELECT COUNT(*) FROM products WHERE in_stock = 1")[0]
+    all_orders = await db.fetchall("SELECT status FROM orders")
+    users_count = (await db.fetchone("SELECT COUNT(*) FROM users"))[0]
+    products_count = (await db.fetchone("SELECT COUNT(*) FROM products WHERE in_stock = 1"))[0]
     
     # Подсчитываем заказы по статусам
     status_counts = {
@@ -438,7 +438,7 @@ async def show_stats(callback: CallbackQuery):
             status_counts[status] += 1
     
     # Вычисляем доходы
-    delivered_orders = db.fetchall("SELECT total_price FROM orders WHERE status = 'delivered'")
+    delivered_orders = await db.fetchall("SELECT total_price FROM orders WHERE status = 'delivered'")
     total_revenue = sum(order[0] for order in delivered_orders)
     
     stats_text = f"""📊 <b>Статистика магазина</b>
@@ -480,7 +480,7 @@ async def process_broadcast(message: Message, state: FSMContext):
     broadcast_text = message.text
     
     # Получаем всех пользователей
-    users = db.fetchall("SELECT user_id FROM users")
+    users = await db.fetchall("SELECT user_id FROM users")
     
     sent = 0
     failed = 0
