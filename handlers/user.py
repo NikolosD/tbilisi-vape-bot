@@ -3,9 +3,13 @@ from aiogram.types import Message, CallbackQuery, Contact
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import json
+import logging
 
 from database import db
 from config import DELIVERY_ZONES, MIN_ORDER_AMOUNT, PAYMENT_INFO, ADMIN_IDS
+
+# Настройка логгера
+logger = logging.getLogger(__name__)
 from keyboards import (
     get_main_menu, get_catalog_keyboard, get_product_card_keyboard,
     get_cart_keyboard, get_delivery_zones_keyboard, get_order_confirmation_keyboard,
@@ -443,11 +447,11 @@ async def process_address(message: Message, state: FSMContext):
     user_id = message.from_user.id
     
     # Отладочная информация
-    print(f"DEBUG: Получен адрес: {address} от пользователя {user_id}")
+    logger.info(f"Получен адрес: {address} от пользователя {user_id}")
     
     # Получаем данные из состояния
     data = await state.get_data()
-    print(f"DEBUG: Данные состояния: {data}")
+    logger.info(f"Данные состояния: {data}")
     
     if 'delivery_zone' not in data:
         await message.answer("❌ Ошибка: данные заказа потеряны. Начните заказ заново.")
@@ -460,17 +464,38 @@ async def process_address(message: Message, state: FSMContext):
     # Получаем корзину и пользователя
     cart_items = await db.get_cart(user_id)
     user = await db.get_user(user_id)
-    phone = user[3]
+    logger.info(f"Корзина пользователя: {cart_items}")
+    logger.info(f"Данные пользователя: {user}")
     
     if not cart_items:
+        logger.warning(f"Корзина пуста для пользователя {user_id}")
         await message.answer("❌ Корзина пуста!")
         await state.clear()
         return
+    
+    if not user:
+        logger.warning(f"Пользователь {user_id} не найден в базе данных, создаем...")
+        # Создаем пользователя автоматически
+        await db.add_user(
+            user_id, 
+            message.from_user.username, 
+            message.from_user.first_name
+        )
+        user = await db.get_user(user_id)
+        if not user:
+            logger.error(f"Не удалось создать пользователя {user_id}")
+            await message.answer("❌ Ошибка: не удалось создать пользователя. Попробуйте /start")
+            await state.clear()
+            return
+        
+    phone = user[3]
     
     # Вычисляем стоимость
     items_total = sum(item[1] * item[3] for item in cart_items)
     delivery_price = zone_info['price']
     total_price = items_total + delivery_price
+    
+    logger.info(f"Стоимость заказа: товары={items_total}, доставка={delivery_price}, итого={total_price}")
     
     # Подготавливаем данные заказа
     products_data = []
@@ -481,6 +506,8 @@ async def process_address(message: Message, state: FSMContext):
             'price': item[3],
             'quantity': item[1]
         })
+    
+    logger.info(f"Данные товаров для заказа: {products_data}")
     
     # Создаем заказ
     try:
@@ -493,9 +520,9 @@ async def process_address(message: Message, state: FSMContext):
             phone=phone,
             address=address
         )
-        print(f"DEBUG: Заказ создан с ID: {order_id}")
+        logger.info(f"Заказ создан с ID: {order_id}")
     except Exception as e:
-        print(f"DEBUG: Ошибка создания заказа: {e}")
+        logger.error(f"Ошибка создания заказа: {e}", exc_info=True)
         await message.answer("❌ Ошибка при создании заказа. Попробуйте еще раз.")
         await state.clear()
         return
