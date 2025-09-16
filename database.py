@@ -54,20 +54,53 @@ class Database:
         query = "SELECT * FROM users WHERE user_id = $1"
         return await self.fetchone(query, user_id)
     
-    # Методы для работы с товарами
-    async def add_product(self, name, price, description, photo=None, category="vape"):
-        """Добавление товара"""
-        query = """INSERT INTO products (name, price, description, photo, category) 
-                   VALUES ($1, $2, $3, $4, $5)"""
-        await self.execute(query, name, price, description, photo, category)
+    # Методы для работы с категориями
+    async def add_category(self, name, emoji=None, description=None):
+        """Добавление категории"""
+        query = """INSERT INTO categories (name, emoji, description) 
+                   VALUES ($1, $2, $3) ON CONFLICT (name) DO NOTHING"""
+        await self.execute(query, name, emoji, description)
     
-    async def get_products(self, category=None):
+    async def get_categories(self):
+        """Получение всех категорий"""
+        query = "SELECT * FROM categories ORDER BY id"
+        return await self.fetchall(query)
+    
+    async def get_categories_with_products(self):
+        """Получение только категорий, в которых есть товары"""
+        query = """SELECT DISTINCT c.* FROM categories c 
+                   INNER JOIN products p ON c.id = p.category_id 
+                   WHERE p.in_stock = true 
+                   ORDER BY c.id"""
+        return await self.fetchall(query)
+    
+    async def get_category(self, category_id):
+        """Получение категории по ID"""
+        query = "SELECT * FROM categories WHERE id = $1"
+        return await self.fetchone(query, category_id)
+    
+    # Методы для работы с товарами
+    async def add_product(self, name, price, description, photo=None, category_id=None):
+        """Добавление товара"""
+        query = """INSERT INTO products (name, price, description, photo, category_id) 
+                   VALUES ($1, $2, $3, $4, $5)"""
+        await self.execute(query, name, price, description, photo, category_id)
+    
+    async def get_products(self, category_id=None):
         """Получение списка товаров"""
-        if category:
-            query = "SELECT * FROM products WHERE category = $1 AND in_stock = true ORDER BY id"
-            return await self.fetchall(query, category)
+        if category_id:
+            query = """SELECT p.*, c.name as category_name, c.emoji as category_emoji 
+                       FROM products p 
+                       LEFT JOIN categories c ON p.category_id = c.id 
+                       WHERE p.category_id = $1 AND p.in_stock = true 
+                       ORDER BY p.id"""
+            return await self.fetchall(query, category_id)
         else:
-            query = "SELECT * FROM products WHERE in_stock = true ORDER BY id"
+            query = """SELECT p.*, c.name as category_name, c.emoji as category_emoji 
+                       FROM products p 
+                       LEFT JOIN categories c ON p.category_id = c.id 
+                       WHERE p.in_stock = true 
+                       ORDER BY p.id"""
             return await self.fetchall(query)
     
     async def get_product(self, product_id):
@@ -172,6 +205,15 @@ async def init_db():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
     
+    # Таблица категорий
+    await conn.execute('''CREATE TABLE IF NOT EXISTS categories (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        emoji TEXT,
+        description TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+    
     # Таблица товаров
     await conn.execute('''CREATE TABLE IF NOT EXISTS products (
         id SERIAL PRIMARY KEY,
@@ -179,7 +221,7 @@ async def init_db():
         price DECIMAL(10,2) NOT NULL,
         description TEXT,
         photo TEXT,
-        category TEXT,
+        category_id INTEGER REFERENCES categories(id),
         in_stock BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')

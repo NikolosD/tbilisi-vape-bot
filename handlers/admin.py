@@ -8,7 +8,8 @@ from database import db
 from config import ADMIN_IDS, DELIVERY_ZONES
 from keyboards import (
     get_admin_keyboard, get_admin_products_keyboard, 
-    get_admin_orders_keyboard, get_admin_order_actions_keyboard
+    get_admin_orders_keyboard, get_admin_order_actions_keyboard,
+    get_admin_categories_keyboard, get_category_selection_keyboard
 )
 
 router = Router()
@@ -20,6 +21,9 @@ class AdminStates(StatesGroup):
     waiting_product_description = State()
     waiting_product_photo = State()
     waiting_broadcast_message = State()
+    waiting_category_name = State()
+    waiting_category_emoji = State()
+    waiting_category_description = State()
 
 # Фильтр для админов
 def admin_filter(message_or_callback):
@@ -191,14 +195,36 @@ async def toggle_product_stock(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_add_product", admin_filter)
 async def start_add_product(callback: CallbackQuery, state: FSMContext):
-    """Начать добавление товара"""
+    """Начать добавление товара - выбор категории"""
+    categories = await db.get_categories()
+    
+    if not categories:
+        await callback.answer("❌ Сначала добавьте категории!", show_alert=True)
+        return
+    
+    await callback.message.edit_text(
+        "➕ <b>Добавление товара</b>\n\n"
+        "Выберите категорию для товара:",
+        reply_markup=get_category_selection_keyboard(categories),
+        parse_mode='HTML'
+    )
+
+@router.callback_query(F.data.startswith("select_category_"), admin_filter)
+async def select_category_for_product(callback: CallbackQuery, state: FSMContext):
+    """Выбор категории для товара"""
+    category_id = int(callback.data.split("_")[2])
+    category = await db.get_category(category_id)
+    
+    await state.update_data(category_id=category_id)
+    
     keyboard = [
         [InlineKeyboardButton(text="🔙 Управление товарами", callback_data="admin_products")]
     ]
     
     await callback.message.edit_text(
-        "➕ <b>Добавление товара</b>\n\n"
-        "Напишите название товара:",
+        f"➕ <b>Добавление товара</b>\n\n"
+        f"📂 <b>Категория:</b> {category[2]} {category[1]}\n\n"
+        f"Напишите название товара:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         parse_mode='HTML'
     )
@@ -266,7 +292,8 @@ async def process_product_photo(message: Message, state: FSMContext):
         name=data['name'],
         price=data['price'],
         description=data['description'],
-        photo=photo_file_id
+        photo=photo_file_id,
+        category_id=data.get('category_id')
     )
     
     await message.answer(
@@ -290,7 +317,8 @@ async def process_product_no_photo(message: Message, state: FSMContext):
         name=data['name'],
         price=data['price'],
         description=data['description'],
-        photo=None
+        photo=None,
+        category_id=data.get('category_id')
     )
     
     await message.answer(
@@ -641,6 +669,93 @@ async def process_broadcast(message: Message, state: FSMContext):
         f"✅ <b>Рассылка завершена!</b>\n\n"
         f"📤 Отправлено: {sent}\n"
         f"❌ Не доставлено: {failed}",
+        parse_mode='HTML'
+    )
+    
+    await state.clear()
+
+# Обработчики для управления категориями
+@router.callback_query(F.data == "admin_categories", admin_filter)
+async def show_admin_categories(callback: CallbackQuery):
+    """Показать управление категориями"""
+    await callback.message.edit_text(
+        "🏷️ <b>Управление категориями</b>\n\n"
+        "Выберите действие:",
+        reply_markup=get_admin_categories_keyboard(),
+        parse_mode='HTML'
+    )
+
+@router.callback_query(F.data == "admin_add_category", admin_filter)
+async def start_add_category(callback: CallbackQuery, state: FSMContext):
+    """Начать добавление категории"""
+    keyboard = [
+        [InlineKeyboardButton(text="🔙 Управление категориями", callback_data="admin_categories")]
+    ]
+    
+    await callback.message.edit_text(
+        "➕ <b>Добавление категории</b>\n\n"
+        "Напишите название категории:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode='HTML'
+    )
+    await state.set_state(AdminStates.waiting_category_name)
+
+@router.message(AdminStates.waiting_category_name, admin_filter)
+async def process_category_name(message: Message, state: FSMContext):
+    """Обработка названия категории"""
+    category_name = message.text
+    await state.update_data(name=category_name)
+    
+    keyboard = [
+        [InlineKeyboardButton(text="🔙 Управление категориями", callback_data="admin_categories")]
+    ]
+    
+    await message.answer(
+        f"➕ <b>Добавление категории</b>\n\n"
+        f"📝 <b>Название:</b> {category_name}\n\n"
+        f"Напишите эмодзи для категории (например: 🧚, 💨, 🔥):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode='HTML'
+    )
+    await state.set_state(AdminStates.waiting_category_emoji)
+
+@router.message(AdminStates.waiting_category_emoji, admin_filter)
+async def process_category_emoji(message: Message, state: FSMContext):
+    """Обработка эмодзи категории"""
+    emoji = message.text
+    await state.update_data(emoji=emoji)
+    
+    keyboard = [
+        [InlineKeyboardButton(text="🔙 Управление категориями", callback_data="admin_categories")]
+    ]
+    
+    await message.answer(
+        f"➕ <b>Добавление категории</b>\n\n"
+        f"📝 <b>Название:</b> {emoji} {message.text}\n\n"
+        f"Напишите описание категории (или отправьте 'пропустить'):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode='HTML'
+    )
+    await state.set_state(AdminStates.waiting_category_description)
+
+@router.message(AdminStates.waiting_category_description, admin_filter)
+async def process_category_description(message: Message, state: FSMContext):
+    """Обработка описания категории"""
+    data = await state.get_data()
+    description = message.text if message.text != "пропустить" else None
+    
+    # Добавляем категорию в базу
+    await db.add_category(
+        name=data['name'],
+        emoji=data['emoji'],
+        description=description
+    )
+    
+    await message.answer(
+        f"✅ <b>Категория добавлена!</b>\n\n"
+        f"📝 <b>Название:</b> {data['emoji']} {data['name']}\n"
+        f"📄 <b>Описание:</b> {description or 'Не указано'}",
+        reply_markup=get_admin_categories_keyboard(),
         parse_mode='HTML'
     )
     

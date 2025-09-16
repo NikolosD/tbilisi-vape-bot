@@ -11,10 +11,11 @@ from config import DELIVERY_ZONES, MIN_ORDER_AMOUNT, PAYMENT_INFO, ADMIN_IDS
 # Настройка логгера
 logger = logging.getLogger(__name__)
 from keyboards import (
-    get_main_menu, get_catalog_keyboard, get_product_card_keyboard,
+    get_main_menu, get_categories_keyboard, get_catalog_keyboard, get_product_card_keyboard,
     get_cart_keyboard, get_delivery_zones_keyboard, get_order_confirmation_keyboard,
     get_orders_keyboard, get_order_details_keyboard, get_contact_keyboard
 )
+from i18n import _
 
 router = Router()
 
@@ -25,18 +26,18 @@ class OrderStates(StatesGroup):
     waiting_payment_screenshot = State()
 
 # Обработчик текстовых сообщений из главного меню
-@router.message(F.text == "🛍 Каталог")
+@router.message(F.text == _("menu.catalog"))
 async def show_catalog(message: Message):
-    """Показать каталог товаров"""
-    products = await db.get_products()
+    """Показать каталог категорий"""
+    categories = await db.get_categories_with_products()
     
-    if not products:
-        await message.answer("📦 Каталог пока пуст. Скоро добавим товары!")
+    if not categories:
+        await message.answer(_("catalog.empty"))
         return
     
     await message.answer(
-        "🛍 <b>Каталог товаров</b>\n\nВыберите товар:",
-        reply_markup=get_catalog_keyboard(products),
+        f"{_('catalog.title')}\n\n{_('catalog.select_category')}",
+        reply_markup=get_categories_keyboard(categories),
         parse_mode='HTML'
     )
 
@@ -146,15 +147,35 @@ async def show_info(message: Message):
 
 @router.callback_query(F.data == "catalog")
 async def callback_catalog(callback: CallbackQuery):
-    """Показать каталог через callback"""
-    products = await db.get_products()
+    """Показать каталог категорий через callback"""
+    categories = await db.get_categories_with_products()
     
-    if not products:
+    if not categories:
         await callback.message.edit_text("📦 Каталог пока пуст. Скоро добавим товары!")
         return
     
     await callback.message.edit_text(
-        "🛍 <b>Каталог товаров</b>\n\nВыберите товар:",
+        "🛍 <b>Каталог товаров</b>\n\nВыберите категорию:",
+        reply_markup=get_categories_keyboard(categories),
+        parse_mode='HTML'
+    )
+
+@router.callback_query(F.data.startswith("category_"))
+async def show_category_products(callback: CallbackQuery):
+    """Показать товары выбранной категории"""
+    category_id = int(callback.data.split("_")[1])
+    products = await db.get_products(category_id)
+    
+    if not products:
+        await callback.answer("📦 В этой категории пока нет товаров", show_alert=True)
+        return
+    
+    category = await db.get_category(category_id)
+    category_name = category[1] if category else "Товары"
+    emoji = category[2] if category and category[2] else "📦"
+    
+    await callback.message.edit_text(
+        f"🛍 <b>{emoji} {category_name}</b>\n\nВыберите товар:",
         reply_markup=get_catalog_keyboard(products),
         parse_mode='HTML'
     )

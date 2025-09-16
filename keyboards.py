@@ -1,16 +1,17 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from i18n import _
 
 # Главное меню
 def get_main_menu(is_admin=False):
     keyboard_rows = [
-        [KeyboardButton(text="🛍 Каталог"), KeyboardButton(text="🛒 Корзина")],
-        [KeyboardButton(text="📋 Мои заказы"), KeyboardButton(text="💬 Связь")],
-        [KeyboardButton(text="ℹ️ Информация")]
+        [KeyboardButton(text=_("menu.catalog")), KeyboardButton(text=_("menu.cart"))],
+        [KeyboardButton(text=_("menu.orders")), KeyboardButton(text=_("menu.contact"))],
+        [KeyboardButton(text=_("menu.info"))]
     ]
     
     # Добавляем кнопку админ-панели только для администраторов
     if is_admin:
-        keyboard_rows.append([KeyboardButton(text="🔧 Админ панель")])
+        keyboard_rows.append([KeyboardButton(text=_("menu.admin_panel"))])
     
     keyboard = ReplyKeyboardMarkup(
         keyboard=keyboard_rows,
@@ -18,6 +19,20 @@ def get_main_menu(is_admin=False):
         persistent=True
     )
     return keyboard
+
+# Каталог категорий
+def get_categories_keyboard(categories):
+    keyboard = []
+    for category in categories:
+        emoji = category[2] if category[2] else "📦"
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"{emoji} {category[1]}",
+                callback_data=f"category_{category[0]}"
+            )
+        ])
+    keyboard.append([InlineKeyboardButton(text=_("cart.back_to_menu"), callback_data="back_to_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # Каталог товаров (inline)
 def get_catalog_keyboard(products):
@@ -29,7 +44,7 @@ def get_catalog_keyboard(products):
                 callback_data=f"product_{product[0]}"
             )
         ])
-    keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")])
+    keyboard.append([InlineKeyboardButton(text="🔙 К категориям", callback_data="catalog")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # Карточка товара
@@ -177,7 +192,31 @@ def get_admin_products_keyboard():
     keyboard = [
         [InlineKeyboardButton(text="➕ Добавить товар", callback_data="admin_add_product")],
         [InlineKeyboardButton(text="📝 Редактировать товары", callback_data="admin_edit_products")],
+        [InlineKeyboardButton(text="🏷️ Управление категориями", callback_data="admin_categories")],
         [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+# Выбор категории для товара (админ)
+def get_category_selection_keyboard(categories):
+    keyboard = []
+    for category in categories:
+        emoji = category[2] if category[2] else "📦"
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"{emoji} {category[1]}",
+                callback_data=f"select_category_{category[0]}"
+            )
+        ])
+    keyboard.append([InlineKeyboardButton(text="🔙 Управление товарами", callback_data="admin_products")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+# Управление категориями (админ)
+def get_admin_categories_keyboard():
+    keyboard = [
+        [InlineKeyboardButton(text="➕ Добавить категорию", callback_data="admin_add_category")],
+        [InlineKeyboardButton(text="📝 Редактировать категории", callback_data="admin_edit_categories")],
+        [InlineKeyboardButton(text="🔙 Управление товарами", callback_data="admin_products")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
