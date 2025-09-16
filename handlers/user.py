@@ -683,6 +683,7 @@ async def cancel_order(callback: CallbackQuery):
 async def show_order_details(callback: CallbackQuery):
     """Показать детали заказа"""
     order_id = int(callback.data.split("_")[1])
+    logger.info(f"Показываем детали заказа {order_id}")
     order = await db.get_order(order_id)
     
     if not order:
@@ -715,7 +716,7 @@ async def show_order_details(callback: CallbackQuery):
 🚚 <b>Доставка:</b> {zone_info['name']} - {order[5]}₾
 📍 <b>Адрес:</b> {order[7]}
 📱 <b>Телефон:</b> {order[6]}
-📅 <b>Дата:</b> {order[10][:16]}
+📅 <b>Дата:</b> {str(order[10])[:16]}
 
 💰 <b>Итого: {order[3]}₾</b>
 
@@ -743,4 +744,18 @@ async def back_to_menu(callback: CallbackQuery):
 @router.callback_query(F.data == "cart")
 async def callback_cart(callback: CallbackQuery):
     """Показать корзину через callback"""
+    await update_cart_display(callback)
+
+@router.callback_query(F.data.startswith("cart_remove_"))
+async def remove_from_cart(callback: CallbackQuery):
+    """Удалить товар из корзины"""
+    product_id = int(callback.data.split("_")[2])
+    user_id = callback.from_user.id
+    
+    # Удаляем товар из корзины
+    await db.remove_from_cart(user_id, product_id)
+    
+    await callback.answer("✅ Товар удален из корзины")
+    
+    # Обновляем отображение корзины
     await update_cart_display(callback)

@@ -369,7 +369,7 @@ async def show_admin_order(callback: CallbackQuery):
 🚚 <b>Доставка:</b> {zone_info['name']} - {order[5]}₾
 📍 <b>Адрес:</b> {order[7]}
 📱 <b>Телефон:</b> {order[6]}
-📅 <b>Дата:</b> {order[10][:16]}
+📅 <b>Дата:</b> {str(order[10])[:16]}
 
 💰 <b>Итого: {order[3]}₾</b>
 
