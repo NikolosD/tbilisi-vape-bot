@@ -83,8 +83,21 @@ def get_catalog_keyboard(products):
     keyboard.append([InlineKeyboardButton(text=_("common.to_categories"), callback_data="catalog")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+# Товары в категории (с информацией о категории)
+def get_category_products_keyboard(products, category_id):
+    keyboard = []
+    for product in products:
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"{product[1]} - {product[2]}₾",
+                callback_data=f"product_{product[0]}_from_{category_id}"
+            )
+        ])
+    keyboard.append([InlineKeyboardButton(text=_("common.to_categories"), callback_data="catalog")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
 # Карточка товара
-def get_product_card_keyboard(product_id, in_cart=False):
+def get_product_card_keyboard(product_id, in_cart=False, from_category=None):
     if in_cart:
         keyboard = [
             [
@@ -92,11 +105,19 @@ def get_product_card_keyboard(product_id, in_cart=False):
                 InlineKeyboardButton(text="➕", callback_data=f"cart_increase_{product_id}")
             ],
             [InlineKeyboardButton(text=_("product.remove_from_cart"), callback_data=f"cart_remove_{product_id}")],
+            [
+                InlineKeyboardButton(text=_("menu.cart"), callback_data="cart"),
+                InlineKeyboardButton(text=_("common.back"), callback_data=f"category_{from_category}" if from_category else "catalog")
+            ],
             [InlineKeyboardButton(text=_("common.to_catalog"), callback_data="catalog")]
         ]
     else:
         keyboard = [
             [InlineKeyboardButton(text=_("product.add_to_cart"), callback_data=f"add_to_cart_{product_id}")],
+            [
+                InlineKeyboardButton(text=_("menu.cart"), callback_data="cart"),
+                InlineKeyboardButton(text=_("common.back"), callback_data=f"category_{from_category}" if from_category else "catalog")
+            ],
             [InlineKeyboardButton(text=_("common.to_catalog"), callback_data="catalog")]
         ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -142,11 +163,11 @@ def get_delivery_zones_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # Подтверждение заказа
-def get_order_confirmation_keyboard(order_id):
+def get_order_confirmation_keyboard(order_id, user_id=None):
     keyboard = [
-        [InlineKeyboardButton(text=_("common.paid"), callback_data=f"payment_done_{order_id}")],
-        [InlineKeyboardButton(text=_("orders.cancel"), callback_data=f"cancel_order_{order_id}")],
-        [InlineKeyboardButton(text=_("common.my_orders"), callback_data="my_orders")]
+        [InlineKeyboardButton(text=_("common.paid", user_id=user_id), callback_data=f"payment_done_{order_id}")],
+        [InlineKeyboardButton(text=_("orders.cancel", user_id=user_id), callback_data=f"cancel_order_{order_id}")],
+        [InlineKeyboardButton(text=_("common.my_orders", user_id=user_id), callback_data="my_orders")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -326,9 +347,81 @@ def get_change_status_keyboard(order_id):
 
 # Выбор языка
 def get_language_keyboard(user_id=None):
+    keyboard = []
+    
+    # Получаем список доступных языков
+    available_languages = i18n.i18n.get_available_languages()
+    
+    # Сопоставление кодов языков с ключами переводов
+    language_mapping = {
+        'ru': 'russian',
+        'en': 'english'
+    }
+    
+    # Создаем кнопки для каждого доступного языка
+    for lang_code in available_languages:
+        language_key = language_mapping.get(lang_code)
+        if language_key:
+            button_text = _(f"language.{language_key}", user_id=user_id)
+            callback_data = f"lang_{lang_code}"
+            keyboard.append([InlineKeyboardButton(text=button_text, callback_data=callback_data)])
+    
+    # Добавляем кнопку "Назад"
+    keyboard.append([InlineKeyboardButton(text=_("common.back", user_id=user_id), callback_data="back_to_menu")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+# Быстрые действия в уведомлениях админу
+def get_payment_notification_keyboard(order_id):
     keyboard = [
-        [InlineKeyboardButton(text=_("language.russian", user_id=user_id), callback_data="lang_ru")],
-        [InlineKeyboardButton(text=_("language.english", user_id=user_id), callback_data="lang_en")],
-        [InlineKeyboardButton(text=_("common.back", user_id=user_id), callback_data="back_to_menu")]
+        [
+            InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"quick_confirm_{order_id}"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"quick_reject_{order_id}")
+        ],
+        [InlineKeyboardButton(text="📋 Детали заказа", callback_data=f"admin_order_{order_id}")],
+        [InlineKeyboardButton(text="📊 Все заказы", callback_data="admin_orders")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+# Улучшенная админ-панель с фильтрами заказов
+def get_enhanced_admin_keyboard():
+    keyboard = [
+        [
+            InlineKeyboardButton(text="🆕 Новые заказы", callback_data="admin_orders_new"),
+            InlineKeyboardButton(text="💰 На проверке", callback_data="admin_orders_checking")
+        ],
+        [
+            InlineKeyboardButton(text="✅ Подтвержденные", callback_data="admin_orders_paid"),
+            InlineKeyboardButton(text="🚚 В доставке", callback_data="admin_orders_shipping")
+        ],
+        [
+            InlineKeyboardButton(text="📦 Доставленные", callback_data="admin_orders_delivered"),
+            InlineKeyboardButton(text="❌ Отмененные", callback_data="admin_orders_cancelled")
+        ],
+        [InlineKeyboardButton(text="📋 Все заказы", callback_data="admin_all_orders")],
+        [InlineKeyboardButton(text="📊 Управление товарами", callback_data="admin_products")],
+        [InlineKeyboardButton(text="📈 Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text=_("common.main_menu"), callback_data="back_to_menu")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+# Фильтр заказов по статусу
+def get_orders_filter_keyboard():
+    keyboard = [
+        [
+            InlineKeyboardButton(text="🆕 Новые", callback_data="filter_waiting_payment"),
+            InlineKeyboardButton(text="💰 Проверка", callback_data="filter_payment_check")
+        ],
+        [
+            InlineKeyboardButton(text="✅ Оплачены", callback_data="filter_paid"),
+            InlineKeyboardButton(text="🚚 Доставка", callback_data="filter_shipping")
+        ],
+        [
+            InlineKeyboardButton(text="📦 Завершены", callback_data="filter_delivered"),
+            InlineKeyboardButton(text="❌ Отменены", callback_data="filter_cancelled")
+        ],
+        [InlineKeyboardButton(text="📋 Все", callback_data="filter_all")],
+        [InlineKeyboardButton(text=_("common.to_admin"), callback_data="admin_panel")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

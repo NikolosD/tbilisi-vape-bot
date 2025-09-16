@@ -8,7 +8,7 @@ import time
 from database import db
 from config import ADMIN_IDS, DELIVERY_ZONES
 from keyboards import (
-    get_admin_keyboard, get_admin_products_keyboard, 
+    get_admin_keyboard, get_enhanced_admin_keyboard, get_admin_products_keyboard, 
     get_admin_orders_keyboard, get_admin_order_actions_keyboard,
     get_admin_categories_keyboard, get_category_selection_keyboard,
     get_change_status_keyboard
@@ -39,17 +39,24 @@ def admin_filter(message_or_callback):
 # Админ панель
 @router.callback_query(F.data == "admin_panel", admin_filter)
 async def show_admin_panel(callback: CallbackQuery):
-    """Показать админ панель"""
-    pending_orders = await db.get_pending_orders()
+    """Показать улучшенную админ панель"""
+    # Получаем статистику по разным типам заказов
+    new_orders = await db.get_new_orders()
+    checking_orders = await db.get_checking_orders()
+    paid_orders = await db.get_paid_orders()
+    shipping_orders = await db.get_shipping_orders()
     products = await db.get_products()
     
     await callback.message.edit_text(
-        f"🔧 <b>Админ-панель</b>\n\n"
-        f"📊 <b>Статистика:</b>\n"
-        f"🆕 Новых заказов: {len(pending_orders)}\n"
-        f"📦 Товаров в каталоге: {len(products)}\n\n"
+        f"🔧 <b>Улучшенная админ-панель</b>\n\n"
+        f"📊 <b>Статистика заказов:</b>\n"
+        f"🆕 Новых: {len(new_orders)}\n"
+        f"💰 На проверке: {len(checking_orders)}\n" 
+        f"✅ Подтвержденных: {len(paid_orders)}\n"
+        f"🚚 В доставке: {len(shipping_orders)}\n"
+        f"📦 Товаров: {len(products)}\n\n"
         f"Выберите действие:",
-        reply_markup=get_admin_keyboard(),
+        reply_markup=get_enhanced_admin_keyboard(),
         parse_mode='HTML'
     )
 
@@ -444,12 +451,12 @@ async def show_admin_order(callback: CallbackQuery):
         'cancelled': '❌ Отменен'
     }
     
-    order_text = f"""📋 <b>Заказ #{order[0]}</b>
+    order_text = f"""📋 <b>Заказ #{order[1]}</b>
 
 👤 <b>Клиент:</b>
 • Имя: {user[2] if user else 'Неизвестно'}
 • Username: @{user[1] if user and user[1] else 'нет'}
-• ID: {order[1]}
+• ID: {order[2]}
 
 📦 <b>Товары:</b>
 """
@@ -457,32 +464,32 @@ async def show_admin_order(callback: CallbackQuery):
     for product in products:
         order_text += f"• {product['name']} × {product['quantity']} = {product['price'] * product['quantity']}₾\n"
     
-    zone_info = DELIVERY_ZONES.get(order[4], {'name': 'Неизвестно'})
+    zone_info = DELIVERY_ZONES.get(order[5], {'name': 'Неизвестно'})
     
     order_text += f"""
-🚚 <b>Доставка:</b> {zone_info['name']} - {order[5]}₾
-📍 <b>Адрес:</b> {order[7]}
-📱 <b>Телефон:</b> {order[6]}
-📅 <b>Дата:</b> {str(order[10])[:16]}
+🚚 <b>Доставка:</b> {zone_info['name']} - {order[6]}₾
+📍 <b>Адрес:</b> {order[8]}
+📱 <b>Телефон:</b> {order[7]}
+📅 <b>Дата:</b> {str(order[11])[:16]}
 
-💰 <b>Итого: {order[3]}₾</b>
+💰 <b>Итого: {order[4]}₾</b>
 
-📊 <b>Статус:</b> {status_text.get(order[8], order[8])}"""
+📊 <b>Статус:</b> {status_text.get(order[9], order[9])}"""
     
     # Если есть скриншот оплаты, показываем его
-    if order[9]:  # payment_screenshot
+    if order[10]:  # payment_screenshot
         try:
             await callback.message.delete()
             await callback.message.answer_photo(
-                photo=order[9],
+                photo=order[10],
                 caption=order_text,
-                reply_markup=get_admin_order_actions_keyboard(order_id, order[8]),
+                reply_markup=get_admin_order_actions_keyboard(order_id, order[9]),
                 parse_mode='HTML'
             )
         except:
             await callback.message.edit_text(
                 order_text + "\n\n📸 Скриншот оплаты прикреплен",
-                reply_markup=get_admin_order_actions_keyboard(order_id, order[8]),
+                reply_markup=get_admin_order_actions_keyboard(order_id, order[9]),
                 parse_mode='HTML'
             )
     else:
@@ -1080,4 +1087,154 @@ async def show_top_blocked(message: Message):
         await message.answer(text, parse_mode="HTML")
     except ImportError:
         await message.answer("❌ Модуль мониторинга безопасности недоступен")
+
+# Быстрые действия из уведомлений
+@router.callback_query(F.data.startswith("quick_confirm_"), admin_filter)
+async def quick_confirm_payment(callback: CallbackQuery):
+    """Быстрое подтверждение оплаты из уведомления"""
+    order_id = int(callback.data.split("_")[2])
+    
+    # Подтверждаем оплату
+    await db.update_order_status(order_id, 'paid')
+    
+    # Отправляем уведомление клиенту
+    order = await db.get_order(order_id)
+    if order:
+        client_text = f"""✅ <b>Оплата подтверждена!</b>
+
+📋 <b>Заказ #{order[1]}</b>
+💰 <b>Сумма:</b> {order[3]}₾
+
+Ваш заказ принят в работу и будет доставлен в ближайшее время.
+Спасибо за покупку! 🎉"""
+        
+        try:
+            await callback.bot.send_message(
+                order[1],  # user_id
+                client_text,
+                parse_mode='HTML'
+            )
+        except:
+            pass
+    
+    # Обновляем сообщение админа
+    await callback.message.edit_caption(
+        caption=callback.message.caption + "\n\n✅ <b>ОПЛАТА ПОДТВЕРЖДЕНА</b>",
+        parse_mode='HTML'
+    )
+    await callback.answer("✅ Оплата подтверждена")
+
+@router.callback_query(F.data.startswith("quick_reject_"), admin_filter)
+async def quick_reject_payment(callback: CallbackQuery):
+    """Быстрое отклонение оплаты из уведомления"""
+    order_id = int(callback.data.split("_")[2])
+    
+    # Возвращаем статус на ожидание оплаты
+    await db.update_order_status(order_id, 'waiting_payment')
+    
+    # Отправляем уведомление клиенту
+    order = await db.get_order(order_id)
+    if order:
+        client_text = f"""❌ <b>Оплата не подтверждена</b>
+
+📋 <b>Заказ #{order[1]}</b>
+💰 <b>Сумма:</b> {order[3]}₾
+
+Пожалуйста, проверьте корректность перевода и пришлите новый скриншот.
+Или свяжитесь с поддержкой для уточнения деталей."""
+        
+        try:
+            await callback.bot.send_message(
+                order[1],  # user_id
+                client_text,
+                parse_mode='HTML'
+            )
+        except:
+            pass
+    
+    # Обновляем сообщение админа
+    await callback.message.edit_caption(
+        caption=callback.message.caption + "\n\n❌ <b>ОПЛАТА ОТКЛОНЕНА</b>",
+        parse_mode='HTML'
+    )
+    await callback.answer("❌ Оплата отклонена")
+
+# Обработчики фильтрованных заказов
+@router.callback_query(F.data.startswith("admin_orders_"), admin_filter)
+async def show_filtered_orders(callback: CallbackQuery):
+    """Показать заказы по категориям"""
+    filter_type = callback.data.split("_")[2]  # new, checking, paid, etc.
+    
+    # Получаем заказы в зависимости от фильтра
+    if filter_type == "new":
+        orders = await db.get_new_orders()
+        title = "🆕 Новые заказы"
+    elif filter_type == "checking":
+        orders = await db.get_checking_orders()
+        title = "💰 Заказы на проверке"
+    elif filter_type == "paid":
+        orders = await db.get_paid_orders()
+        title = "✅ Подтвержденные заказы"
+    elif filter_type == "shipping":
+        orders = await db.get_shipping_orders()
+        title = "🚚 Заказы в доставке"
+    elif filter_type == "delivered":
+        orders = await db.get_delivered_orders()
+        title = "📦 Доставленные заказы"
+    elif filter_type == "cancelled":
+        orders = await db.get_cancelled_orders()
+        title = "❌ Отмененные заказы"
+    else:
+        orders = await db.get_all_orders()
+        title = "📋 Все заказы"
+    
+    if not orders:
+        await callback.message.edit_text(
+            f"{title}\n\nЗаказов не найдено.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Обновить", callback_data=callback.data)],
+                [InlineKeyboardButton(text=_("common.to_admin"), callback_data="admin_panel")]
+            ]),
+            parse_mode='HTML'
+        )
+        return
+    
+    text = f"<b>{title}</b>\n\nВсего заказов: {len(orders)}\n\n"
+    
+    # Показываем последние 10 заказов
+    for order in orders[:10]:
+        status_emoji = {
+            'waiting_payment': '⏳',
+            'payment_check': '💰',
+            'paid': '✅',
+            'shipping': '🚚',
+            'delivered': '📦',
+            'cancelled': '❌'
+        }
+        
+        emoji = status_emoji.get(order[9], '❓')
+        text += f"{emoji} Заказ #{order[1]} - {order[4]}₾\n"
+        text += f"   {str(order[11])[:16]} - ID: {order[2]}\n\n"
+    
+    if len(orders) > 10:
+        text += f"... и еще {len(orders) - 10} заказов"
+    
+    # Создаем клавиатуру с заказами
+    keyboard = []
+    for order in orders[:10]:
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"📋 Заказ #{order[1]}",
+                callback_data=f"admin_order_{order[0]}"
+            )
+        ])
+    
+    keyboard.append([InlineKeyboardButton(text="🔄 Обновить", callback_data=callback.data)])
+    keyboard.append([InlineKeyboardButton(text=_("common.to_admin"), callback_data="admin_panel")])
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode='HTML'
+    )
 

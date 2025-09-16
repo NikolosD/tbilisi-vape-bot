@@ -81,10 +81,10 @@ async def cmd_admin(message: Message):
             first_name=message.from_user.first_name
         )
     
-    from keyboards import get_admin_keyboard
+    from keyboards import get_enhanced_admin_keyboard
     await message.answer(
-        "🔧 <b>Админ-панель</b>\n\nВыберите действие:",
-        reply_markup=get_admin_keyboard(),
+        "🔧 <b>Улучшенная админ-панель</b>\n\nВыберите действие:",
+        reply_markup=get_enhanced_admin_keyboard(),
         parse_mode='HTML'
     )
 
@@ -106,10 +106,10 @@ async def admin_panel_button(message: Message):
             message.from_user.first_name
         )
     
-    from keyboards import get_admin_keyboard
+    from keyboards import get_enhanced_admin_keyboard
     await message.answer(
-        "🔧 <b>Админ-панель</b>\n\nВыберите действие:",
-        reply_markup=get_admin_keyboard(),
+        "🔧 <b>Улучшенная админ-панель</b>\n\nВыберите действие:",
+        reply_markup=get_enhanced_admin_keyboard(),
         parse_mode='HTML'
     )
 

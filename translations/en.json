@@ -4,17 +4,19 @@
     "cart": "🛒 Cart",
     "orders": "📋 My Orders",
     "contact": "💬 Contact",
-    "info": "ℹ️ Information",
+    "info": "ℹ️ Info",
     "language": "🌐 Language",
     "admin_panel": "🔧 Admin Panel"
   },
+  
   "catalog": {
     "title": "🛍 <b>Product Catalog</b>",
     "select_category": "Choose category:",
     "select_product": "Choose product:",
-    "empty": "📦 Catalog is empty. We'll add products soon!",
-    "category_empty": "📦 This category is empty"
+    "empty": "📦 Catalog is empty. Products coming soon!",
+    "category_empty": "📦 No products in this category yet"
   },
+  
   "product": {
     "price": "💰 Price: {price}₾",
     "description": "📝 Description:",
@@ -23,60 +25,66 @@
     "remove_from_cart": "❌ Remove from cart",
     "back_to_catalog": "🔙 Back to catalog"
   },
+  
   "cart": {
-    "title": "🛒 <b>Your cart:</b>",
+    "title": "🛒 <b>Your Cart:</b>",
     "empty": "🛒 <b>Your cart is empty</b>\n\nAdd products from catalog!",
     "item": "• {name}\n  Quantity: {quantity} pcs.\n  Price: {price}₾ × {quantity} = {total}₾\n",
     "total": "💰 <b>Total: {total}₾</b>",
     "checkout": "📝 Checkout",
     "clear": "🗑 Clear cart",
     "back_to_menu": "🔙 Main menu",
-    "item_removed": "✅ Product removed from cart",
-    "item_added": "✅ Product added to cart",
-    "quantity_increased": "✅ Quantity increased to {quantity}",
-    "quantity_decreased": "✅ Quantity decreased to {quantity}",
-    "item_deleted": "🗑 Product deleted from cart"
+    "item_removed": "✅ Item removed from cart",
+    "item_added": "✅ Item added to cart",
+    "quantity_updated": "✅ Quantity updated"
   },
+  
   "orders": {
-    "title": "📋 <b>Your orders:</b>",
-    "select_order": "Choose order to view details:",
-    "empty": "📋 <b>You have no orders yet</b>\n\nMake your first order!",
-    "details": "📋 <b>Order details #{order_id}</b>",
-    "products": "🛍 <b>Products:</b>",
-    "delivery": "🚚 <b>Delivery:</b> {zone} - {price}₾",
-    "address": "📍 <b>Address:</b> {address}",
-    "phone": "📱 <b>Phone:</b> {phone}",
-    "date": "📅 <b>Date:</b> {date}",
-    "total": "💰 <b>Total: {total}₾</b>",
-    "status": "📊 <b>Status:</b> {status}",
-    "cancel": "❌ Cancel order",
-    "canceled": "✅ Order canceled",
-    "cannot_cancel": "❌ Order cannot be canceled"
+    "title": "📋 <b>My Orders</b>",
+    "empty": "📋 <b>You have no orders yet</b>\n\nPlace your first order in catalog!",
+    "order_info": "📋 <b>Order #{order_id}</b>\n📅 {date}\n💰 {total}₾\n📊 {status}",
+    "view_details": "👁 Details",
+    "cancel_order": "❌ Cancel order",
+    "back_to_menu": "🔙 Main menu",
+    "order_details": "📋 <b>Order #{order_id}</b>\n\n📅 <b>Date:</b> {date}\n💰 <b>Amount:</b> {total}₾\n📊 <b>Status:</b> {status}\n\n📦 <b>Products:</b>\n{products}\n\n🚚 <b>Delivery:</b> {delivery_zone} - {delivery_price}₾\n📍 <b>Address:</b> {address}\n📱 <b>Phone:</b> {phone}",
+    "status_waiting_payment": "⏳ Waiting for payment",
+    "status_payment_check": "💰 Payment verification",
+    "status_paid": "✅ Paid",
+    "status_shipping": "🚚 Shipping",
+    "status_delivered": "✅ Delivered",
+    "status_cancelled": "❌ Cancelled",
+    "canceled": "✅ Order cancelled",
+    "cannot_cancel": "❌ Cannot cancel order",
+    "cancel": "❌ Cancel order"
   },
+  
   "checkout": {
     "delivery_zones": "🚚 <b>Choose delivery zone:</b>",
     "zone_info": "🚚 <b>Zone:</b> {name}\n💰 <b>Delivery cost:</b> {price}₾\n⏱ <b>Delivery time:</b> {time}",
-    "enter_address": "Enter exact delivery address:",
+    "enter_address": "Enter delivery address:",
     "contact_request": "📱 <b>Contact Information</b>\n\nShare your phone number for contact:",
     "order_created": "✅ <b>Order created!</b>\n\n📋 <b>Order number:</b> #{order_id}\n💰 <b>Amount to pay:</b> {total}₾\n\n💳 <b>Payment methods:</b>\n{payment_info}\n\n📸 <b>Send payment screenshot after payment</b>",
     "order_error": "❌ Error creating order. Please try again."
   },
+  
   "contact": {
-    "title": "💬 <b>Contact us</b>",
-    "description": "❓ <b>For questions:</b>\n• Order status\n• Help with selection\n• Technical issues\n• Suggestions and complaints\n\n⚡ <b>Quick response during business hours!</b>"
+    "title": "💬 <b>Contact Us</b>",
+    "description": "❓ <b>For questions:</b>\n• Order status\n• Product help\n• Technical issues\n• Suggestions and complaints\n\n⚡ <b>Quick response during business hours!</b>"
   },
+  
   "info": {
     "title": "ℹ️ <b>Store Information</b>",
-    "shop_name": "🏪 <b>Tbilisi VAPE Shop</b>\n🇬🇪 Best disposable vape shop in Tbilisi",
-    "advantages": "✅ <b>Our advantages:</b>\n• Only original products\n• Fast delivery in Tbilisi\n• Competitive prices\n• Professional consultation",
+    "shop_name": "🏪 <b>Tbilisi VAPE Shop</b>\n🇬🇪 Best disposable cigarettes shop in Tbilisi",
+    "advantages": "✅ <b>Our advantages:</b>\n• Original products only\n• Fast delivery in Tbilisi\n• Competitive prices\n• Professional consultation",
     "delivery": "🚚 <b>Delivery:</b>\n• All over Tbilisi\n• Time: 30-90 minutes\n• Minimum order: {min_order}₾",
-    "payment": "💳 <b>Payment:</b>\n• Cash on delivery\n• Bank transfer\n• Cryptocurrency"
+    "payment": "💳 <b>Payment:</b>\n• Cash on delivery\n• Card transfer\n• Cryptocurrency"
   },
+  
   "admin": {
     "panel": "🔧 <b>Admin Panel</b>",
     "products": "📦 Product Management",
     "orders": "📋 New Orders",
-    "all_orders": "📋 All Orders",
+    "all_orders": "📋 All Orders", 
     "stats": "📊 Statistics",
     "broadcast": "📢 Broadcast",
     "categories": "🏷️ Category Management",
@@ -88,13 +96,10 @@
     "back_to_products": "🔙 Product Management",
     "back_to_categories": "🔙 Category Management"
   },
-  "welcome": {
-    "title": "🔥 <b>Welcome to Tbilisi VAPE Shop!</b>",
-    "description": "🚬 Best disposable e-cigarettes in Tbilisi\n🚀 Fast delivery throughout the city\n💯 Only original products\n💰 Best prices in the city",
-    "start_shopping": "🛍 Start shopping"
-  },
+
   "language": {
-    "select": "🌐 <b>Choose language:</b>",
+    "title": "🌐 <b>Language Selection</b>",
+    "select": "Select language:",
     "russian": "🇷🇺 Русский",
     "english": "🇺🇸 English",
     "changed": "✅ Language changed to {language}"

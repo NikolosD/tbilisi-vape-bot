@@ -7,11 +7,12 @@ import logging
 
 from database import db
 from config import DELIVERY_ZONES, MIN_ORDER_AMOUNT, PAYMENT_INFO, ADMIN_IDS
+from models import OrderStatus
 
 # Настройка логгера
 logger = logging.getLogger(__name__)
 from keyboards import (
-    get_main_menu, get_main_menu_inline, get_categories_keyboard, get_catalog_keyboard, get_product_card_keyboard,
+    get_main_menu, get_main_menu_inline, get_categories_keyboard, get_catalog_keyboard, get_category_products_keyboard, get_product_card_keyboard,
     get_cart_keyboard, get_delivery_zones_keyboard, get_order_confirmation_keyboard,
     get_orders_keyboard, get_order_details_keyboard, get_contact_keyboard, get_language_keyboard
 )
@@ -60,14 +61,13 @@ async def show_cart(message: Message):
         )
         return
     
-    total = sum(item[1] * item[3] for item in cart_items)  # quantity * price
+    total = sum(item.quantity * item.price for item in cart_items)
     
     cart_text = "🛒 <b>Ваша корзина:</b>\n\n"
     for item in cart_items:
-        product_id, quantity, name, price, photo = item
-        cart_text += f"• {name}\n"
-        cart_text += f"  Количество: {quantity} шт.\n"
-        cart_text += f"  Цена: {price}₾ × {quantity} = {price * quantity}₾\n\n"
+        cart_text += f"• {item.name}\n"
+        cart_text += f"  Количество: {item.quantity} шт.\n"
+        cart_text += f"  Цена: {item.price}₾ × {item.quantity} = {item.price * item.quantity}₾\n\n"
     
     cart_text += _("cart.total", total=total)
     
@@ -193,14 +193,21 @@ async def show_category_products(callback: CallbackQuery):
     
     await callback.message.edit_text(
         f"🛍 <b>{emoji} {category_name}</b>\n\nВыберите товар:",
-        reply_markup=get_catalog_keyboard(products),
+        reply_markup=get_category_products_keyboard(products, category_id),
         parse_mode='HTML'
     )
 
 @router.callback_query(F.data.startswith("product_"))
 async def show_product(callback: CallbackQuery):
     """Показать карточку товара"""
-    product_id = int(callback.data.split("_")[1])
+    data_parts = callback.data.split("_")
+    product_id = int(data_parts[1])
+    
+    # Проверяем, пришли ли из категории
+    from_category = None
+    if len(data_parts) > 3 and data_parts[2] == "from":
+        from_category = int(data_parts[3])
+    
     product = await db.get_product(product_id)
     
     if not product:
@@ -221,7 +228,7 @@ async def show_product(callback: CallbackQuery):
 
 {'🛒 <i>Товар уже в корзине</i>' if in_cart else ''}"""
     
-    keyboard = get_product_card_keyboard(product_id, in_cart)
+    keyboard = get_product_card_keyboard(product_id, in_cart, from_category)
     
     if product[4]:  # Если есть фото
         try:
@@ -426,7 +433,7 @@ async def select_delivery(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
     
-    if not user[3]:  # Если нет номера телефона
+    if not user.phone:  # Если нет номера телефона
         # Удаляем сообщение и отправляем новое с ReplyKeyboard
         await callback.message.delete()
         await callback.message.answer(
@@ -526,11 +533,11 @@ async def process_address(message: Message, state: FSMContext):
             await state.clear()
             return
         
-    phone = user[3]
+    phone = user.phone
     
     # Вычисляем стоимость
-    items_total = sum(float(item[1] * item[3]) for item in cart_items)  # Преобразуем в float
-    delivery_price = float(zone_info['price'])  # Преобразуем в float
+    items_total = sum(float(item.quantity * item.price) for item in cart_items)
+    delivery_price = float(zone_info['price'])
     total_price = items_total + delivery_price
     
     logger.info(f"Стоимость заказа: товары={items_total}, доставка={delivery_price}, итого={total_price}")
@@ -539,10 +546,10 @@ async def process_address(message: Message, state: FSMContext):
     products_data = []
     for item in cart_items:
         products_data.append({
-            'id': item[0],
-            'name': item[2],
-            'price': float(item[3]),  # Преобразуем Decimal в float
-            'quantity': item[1]
+            'id': item.product_id,
+            'name': item.name,
+            'price': float(item.price),
+            'quantity': item.quantity
         })
     
     logger.info(f"Данные товаров для заказа: {products_data}")
@@ -593,24 +600,11 @@ async def process_address(message: Message, state: FSMContext):
     
     await message.answer(
         order_text,
-        reply_markup=get_order_confirmation_keyboard(order_id),
+        reply_markup=get_order_confirmation_keyboard(order_id, user_id=user_id),
         parse_mode='HTML'
     )
     
-    # Уведомляем админов о новом заказе
-    from config import ADMIN_IDS
-    for admin_id in ADMIN_IDS:
-        try:
-            await message.bot.send_message(
-                admin_id,
-                f"🆕 <b>Новый заказ #{order_id}</b>\n\n"
-                f"👤 Пользователь: {message.from_user.first_name} (@{message.from_user.username})\n"
-                f"💰 Сумма: {total_price}₾\n"
-                f"📍 Адрес: {address}",
-                parse_mode='HTML'
-            )
-        except:
-            pass
+    # Уведомление админу будет отправлено только после загрузки скриншота оплаты
     
     await state.clear()
 
@@ -637,8 +631,8 @@ async def process_payment_screenshot(message: Message, state: FSMContext):
     
     # Сохраняем file_id скриншота
     photo_file_id = message.photo[-1].file_id
-    await db.update_order_screenshot(order_id, photo_file_id)
-    await db.update_order_status(order_id, 'payment_check')
+    await db.update_order_screenshot_by_number(order_id, photo_file_id)
+    await db.update_order_status_by_number(order_id, 'payment_check')
     
     await message.answer(
         f"✅ <b>Скриншот получен!</b>\n\n"
@@ -651,49 +645,76 @@ async def process_payment_screenshot(message: Message, state: FSMContext):
     # Уведомляем админов с подробной информацией
     from config import ADMIN_IDS, DELIVERY_ZONES
     import json
-    order = await db.get_order(order_id)
     
-    if order:
-        # Парсим продукты
-        products = json.loads(order[2])
-        
-        # Формируем подробное уведомление
-        admin_text = f"""💰 <b>Скриншот оплаты заказа #{order_id}</b>
+    logger.info(f"Загружены ADMIN_IDS из config: {ADMIN_IDS}")
+    logger.info(f"Тип ADMIN_IDS: {type(ADMIN_IDS)}")
+    
+    logger.info(f"Получаем данные заказа {order_id} для уведомления админов")
+    order = await db.get_order_by_number(order_id)
+    
+    if not order:
+        logger.error(f"Заказ {order_id} не найден в базе данных!")
+        return
+    
+    logger.info(f"Заказ {order_id} найден, формируем уведомление для админов")
+    logger.info(f"Структура заказа: {order}")
+    
+    # Парсим продукты  
+    products = order.products_data
+    
+    # Получаем информацию о пользователе
+    user = await db.get_user(message.from_user.id)
+    
+    # Формируем красивое уведомление
+    admin_text = f"""🔔 <b>Новый заказ #{order.order_number}</b>
 
-👤 <b>Клиент:</b>
-• Имя: {message.from_user.first_name or 'Не указано'}
-• Username: @{message.from_user.username or 'Не указано'}
-• ID: {message.from_user.id}
+👤 <b>Пользователь:</b> {message.from_user.first_name or 'Неизвестно'} (@{message.from_user.username or 'нет'})
+💰 <b>Сумма:</b> {order.total_price}₾
+📍 <b>Адрес:</b> {order.address}
 
-📦 <b>Товары:</b>
+📦 <b>Состав заказа:</b>
 """
-        
-        for product in products:
-            admin_text += f"• {product['name']} × {product['quantity']} = {product['price'] * product['quantity']}₾\n"
-        
-        # Информация о доставке
-        zone_info = DELIVERY_ZONES.get(order[4], {'name': 'Неизвестно'})
-        
-        admin_text += f"""
-🚚 <b>Доставка:</b> {zone_info['name']} - {order[5]}₾
-📍 <b>Адрес:</b> {order[7]}
-📱 <b>Телефон:</b> {order[6]}
-📅 <b>Дата:</b> {str(order[10])[:16]}
+    
+    for product in products:
+        admin_text += f"• {product['name']} × {product['quantity']} = {product['price'] * product['quantity']}₾\n"
+    
+    # Информация о доставке
+    zone_info = DELIVERY_ZONES.get(order.delivery_zone, {'name': 'Неизвестно'})
+    
+    admin_text += f"""
+🚚 <b>Доставка:</b> {zone_info['name']} - {order.delivery_price}₾
+📱 <b>Телефон:</b> {order.phone}
+📅 <b>Дата заказа:</b> {str(order.created_at)[:16]}
 
-💰 <b>Итого: {order[3]}₾</b>
-
-📊 <b>Статус:</b> 💰 Проверка оплаты"""
-        
-        for admin_id in ADMIN_IDS:
-            try:
-                await message.bot.send_photo(
-                    admin_id,
-                    photo=photo_file_id,
-                    caption=admin_text,
-                    parse_mode='HTML'
-                )
-            except:
-                pass
+💳 <b>Скриншот оплаты приложен</b>
+⏳ <b>Ожидает проверки</b>"""
+    
+    # Импортируем клавиатуру быстрых действий
+    from keyboards import get_payment_notification_keyboard
+    
+    logger.info(f"Отправляем уведомления админам. ADMIN_IDS: {ADMIN_IDS}")
+    logger.info(f"Количество админов: {len(ADMIN_IDS)}")
+    
+    if not ADMIN_IDS:
+        logger.error("ADMIN_IDS пуст! Проверьте переменную окружения ADMIN_IDS")
+        return
+    
+    for admin_id in ADMIN_IDS:
+        try:
+            logger.info(f"Попытка отправить уведомление админу {admin_id}")
+            await message.bot.send_photo(
+                admin_id,
+                photo=photo_file_id,
+                caption=admin_text,
+                reply_markup=get_payment_notification_keyboard(order.id),
+                parse_mode='HTML'
+            )
+            logger.info(f"✅ Уведомление успешно отправлено админу {admin_id}")
+        except Exception as e:
+            logger.error(f"❌ Не удалось отправить уведомление админу {admin_id}: {e}")
+            logger.error(f"Тип ошибки: {type(e).__name__}")
+            import traceback
+            logger.error(f"Полная ошибка: {traceback.format_exc()}")
     
     await state.clear()
 
@@ -723,18 +744,18 @@ async def cancel_order(callback: CallbackQuery):
     user_id = callback.from_user.id
     
     # Проверяем, что заказ принадлежит пользователю
-    order = await db.get_order(order_id)
-    if not order or order[1] != user_id:
+    order = await db.get_order_by_number(order_id)
+    if not order or order.user_id != user_id:
         await callback.answer("❌ Заказ не найден", show_alert=True)
         return
     
     # Проверяем, что заказ можно отменить (только ожидающие оплату)
-    if order[8] not in ['waiting_payment', 'payment_check']:
+    if order.status not in [OrderStatus.WAITING_PAYMENT, OrderStatus.PAYMENT_CHECK]:
         await callback.answer("❌ Заказ нельзя отменить", show_alert=True)
         return
     
     # Отменяем заказ
-    await db.update_order_status(order_id, 'cancelled')
+    await db.update_order_status_by_number(order_id, 'cancelled')
     
     await callback.answer("✅ Заказ отменен", show_alert=True)
     
@@ -759,7 +780,7 @@ async def show_order_details(callback: CallbackQuery):
         return
     
     # Парсим продукты
-    products = json.loads(order[2])
+    products = json.loads(order[3])
     
     status_text = {
         'waiting_payment': '⏳ Ожидает оплаты',
@@ -770,7 +791,7 @@ async def show_order_details(callback: CallbackQuery):
         'cancelled': '❌ Отменен'
     }
     
-    order_text = f"""📋 <b>Заказ #{order[0]}</b>
+    order_text = f"""📋 <b>Заказ #{order[1]}</b>
 
 📦 <b>Товары:</b>
 """
@@ -778,17 +799,17 @@ async def show_order_details(callback: CallbackQuery):
     for product in products:
         order_text += f"• {product['name']} × {product['quantity']} = {product['price'] * product['quantity']}₾\n"
     
-    zone_info = DELIVERY_ZONES.get(order[4], {'name': 'Неизвестно'})
+    zone_info = DELIVERY_ZONES.get(order[5], {'name': 'Неизвестно'})
     
     order_text += f"""
-🚚 <b>Доставка:</b> {zone_info['name']} - {order[5]}₾
-📍 <b>Адрес:</b> {order[7]}
-📱 <b>Телефон:</b> {order[6]}
-📅 <b>Дата:</b> {str(order[10])[:16]}
+🚚 <b>Доставка:</b> {zone_info['name']} - {order[6]}₾
+📍 <b>Адрес:</b> {order[8]}
+📱 <b>Телефон:</b> {order[7]}
+📅 <b>Дата:</b> {str(order[11])[:16]}
 
-💰 <b>Итого: {order[3]}₾</b>
+💰 <b>Итого: {order[4]}₾</b>
 
-📊 <b>Статус:</b> {status_text.get(order[8], order[8])}"""
+📊 <b>Статус:</b> {status_text.get(order[9], order[9])}"""
     
     await callback.message.edit_text(
         order_text,
@@ -818,11 +839,15 @@ async def change_language(callback: CallbackQuery):
     # Устанавливаем язык для пользователя
     i18n.i18n.set_language(language, user_id)
     
-    # Получаем название языка для сообщения
-    language_names = {
-        "ru": "Русский",
-        "en": "English"
+    # Сопоставление кодов языков с ключами переводов
+    language_mapping = {
+        'ru': 'russian',
+        'en': 'english'
     }
+    
+    # Получаем название языка из переводов
+    language_key = language_mapping.get(language, language)
+    language_name = _(f"language.{language_key}", user_id=user_id)
     
     # Просто подтверждаем нажатие кнопки без уведомления
     await callback.answer()
@@ -843,7 +868,12 @@ async def change_language(callback: CallbackQuery):
             parse_mode='HTML'
         )
     
-    # Reply клавиатура обновится автоматически при следующем сообщении пользователя
+    # Отправляем новое сообщение с обновленной Reply клавиатурой
+    await callback.message.answer(
+        _("language.changed", user_id=user_id, language=language_name),
+        reply_markup=get_main_menu(is_admin=is_admin, user_id=user_id),
+        parse_mode='HTML'
+    )
 
 # Обработчики для inline кнопок главного меню
 @router.callback_query(F.data == "catalog")
