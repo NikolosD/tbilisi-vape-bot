@@ -491,8 +491,8 @@ async def process_address(message: Message, state: FSMContext):
     phone = user[3]
     
     # Вычисляем стоимость
-    items_total = sum(item[1] * item[3] for item in cart_items)
-    delivery_price = zone_info['price']
+    items_total = sum(float(item[1] * item[3]) for item in cart_items)  # Преобразуем в float
+    delivery_price = float(zone_info['price'])  # Преобразуем в float
     total_price = items_total + delivery_price
     
     logger.info(f"Стоимость заказа: товары={items_total}, доставка={delivery_price}, итого={total_price}")
@@ -503,7 +503,7 @@ async def process_address(message: Message, state: FSMContext):
         products_data.append({
             'id': item[0],
             'name': item[2],
-            'price': item[3],
+            'price': float(item[3]),  # Преобразуем Decimal в float
             'quantity': item[1]
         })
     

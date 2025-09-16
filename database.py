@@ -124,8 +124,12 @@ class Database:
         INSERT INTO orders (user_id, products, total_price, delivery_zone, delivery_price, phone, address) 
         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
         """
-        result = await self.fetchone(query, user_id, json.dumps(products), total_price, 
-                                   delivery_zone, delivery_price, phone, address)
+        # Преобразуем цены в float для корректной сериализации
+        total_price_float = float(total_price)
+        delivery_price_float = float(delivery_price)
+        
+        result = await self.fetchone(query, user_id, json.dumps(products), total_price_float, 
+                                   delivery_zone, delivery_price_float, phone, address)
         return result['id']
     
     async def get_order(self, order_id):
