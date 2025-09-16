@@ -86,7 +86,7 @@ def get_cart_keyboard(cart_items):
         keyboard.append([InlineKeyboardButton(text="📝 Оформить заказ", callback_data="checkout")])
         keyboard.append([InlineKeyboardButton(text="🗑 Очистить корзину", callback_data="clear_cart")])
     
-    keyboard.append([InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_menu")])
+    keyboard.append([InlineKeyboardButton(text=_("cart.back_to_menu"), callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # Выбор зоны доставки
@@ -149,7 +149,7 @@ def get_orders_keyboard(orders):
             )
         ])
     
-    keyboard.append([InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_menu")])
+    keyboard.append([InlineKeyboardButton(text=_("cart.back_to_menu"), callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # Детали заказа

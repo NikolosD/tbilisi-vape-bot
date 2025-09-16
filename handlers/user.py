@@ -41,7 +41,7 @@ async def show_catalog(message: Message):
         parse_mode='HTML'
     )
 
-@router.message(F.text == "🛒 Корзина")
+@router.message(F.text == _("menu.cart"))
 async def show_cart(message: Message):
     """Показать корзину"""
     user_id = message.from_user.id
@@ -71,7 +71,7 @@ async def show_cart(message: Message):
         parse_mode='HTML'
     )
 
-@router.message(F.text == "📋 Мои заказы")
+@router.message(F.text == _("menu.orders"))
 async def show_orders(message: Message):
     """Показать заказы пользователя"""
     user_id = message.from_user.id
@@ -90,7 +90,7 @@ async def show_orders(message: Message):
         parse_mode='HTML'
     )
 
-@router.message(F.text == "💬 Связь")
+@router.message(F.text == _("menu.contact"))
 async def show_contact(message: Message):
     """Показать контактную информацию"""
     contact_text = """💬 <b>Связь с нами</b>
@@ -109,7 +109,7 @@ async def show_contact(message: Message):
 
     await message.answer(contact_text, parse_mode='HTML')
 
-@router.message(F.text == "ℹ️ Информация")
+@router.message(F.text == _("menu.info"))
 async def show_info(message: Message):
     """Показать информацию о магазине"""
     info_text = """ℹ️ <b>Информация о магазине</b>
