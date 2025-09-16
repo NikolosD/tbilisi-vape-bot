@@ -4,9 +4,11 @@ from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiohttp import web, ClientSession
+import os
 
 from config import BOT_TOKEN, ADMIN_IDS
-from database import db
+from database import db, init_db
 from keyboards import get_main_menu
 from handlers.user import router as user_router
 from handlers.admin import router as admin_router
@@ -95,14 +97,37 @@ async def cmd_help(message: Message):
 
     await message.answer(help_text, parse_mode='HTML')
 
+async def health_check(request):
+    """Health check endpoint для Render"""
+    return web.Response(text="Bot is running!")
+
 async def main():
     """Запуск бота"""
     try:
-        logger.info("Запуск бота...")
-        await dp.start_polling(bot)
+        logger.info("Инициализация базы данных...")
+        await init_db()
+        
+        # Запуск веб-сервера для Render
+        if os.getenv('RENDER'):
+            logger.info("Запуск в режиме веб-сервиса для Render...")
+            app = web.Application()
+            app.router.add_get('/', health_check)
+            app.router.add_get('/health', health_check)
+            
+            # Запуск бота в фоне
+            asyncio.create_task(dp.start_polling(bot))
+            
+            # Запуск веб-сервера
+            port = int(os.getenv('PORT', 10000))
+            await web._run_app(app, host='0.0.0.0', port=port)
+        else:
+            logger.info("Запуск в режиме polling...")
+            await dp.start_polling(bot)
+            
     except Exception as e:
         logger.error(f"Ошибка при запуске бота: {e}")
     finally:
+        await db.close_pool()
         await bot.session.close()
 
 if __name__ == "__main__":

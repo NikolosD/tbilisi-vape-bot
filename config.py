@@ -7,7 +7,7 @@ BOT_TOKEN = os.getenv("TOKEN", "8131799075:AAEqxNvL7MNxlBtO79JBDfwAu8HB9CLz-JY")
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "617646449").split(",")]
 
 # База данных
-DATABASE_PATH = "shop.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://tbilisi_vape_db_user:p6BLS96UYDyQdyuFuN0KsDF5oqSWkg5x@dpg-d34n7s2li9vc7395q6d0-a.oregon-postgres.render.com/tbilisi_vape_db")
 
 # Реквизиты для оплаты
 PAYMENT_INFO = {
