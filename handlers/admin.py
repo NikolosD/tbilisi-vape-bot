@@ -47,18 +47,43 @@ async def show_admin_panel(callback: CallbackQuery):
     shipping_orders = await db.get_shipping_orders()
     products = await db.get_all_products()
     
-    await callback.message.edit_text(
-        f"🔧 <b>Улучшенная админ-панель</b>\n\n"
-        f"📊 <b>Статистика заказов:</b>\n"
-        f"🆕 Новых: {len(new_orders)}\n"
-        f"💰 На проверке: {len(checking_orders)}\n" 
-        f"✅ Подтвержденных: {len(paid_orders)}\n"
-        f"🚚 В доставке: {len(shipping_orders)}\n"
-        f"📦 Товаров: {len(products)}\n\n"
-        f"Выберите действие:",
-        reply_markup=get_enhanced_admin_keyboard(),
-        parse_mode='HTML'
-    )
+    import datetime
+    current_time = datetime.datetime.now().strftime("%H:%M")
+    
+    try:
+        await callback.message.edit_text(
+            f"🔧 <b>Улучшенная админ-панель</b> <i>({current_time})</i>\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 <b>СТАТИСТИКА ЗАКАЗОВ</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🆕 <b>Новые заказы:</b> <code>{len(new_orders):>8}</code>\n"
+            f"💰 <b>На проверке:</b> <code>{len(checking_orders):>10}</code>\n" 
+            f"✅ <b>Подтвержденные:</b> <code>{len(paid_orders):>6}</code>\n"
+            f"🚚 <b>В доставке:</b> <code>{len(shipping_orders):>9}</code>\n"
+            f"📦 <b>Всего товаров:</b> <code>{len(products):>7}</code>\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⚡ <b>Выберите действие для работы:</b>",
+            reply_markup=get_enhanced_admin_keyboard(),
+            parse_mode='HTML'
+        )
+    except Exception:
+        # Если не получилось отредактировать, отправляем новое сообщение
+        await callback.message.delete()
+        await callback.message.answer(
+            f"🔧 <b>Улучшенная админ-панель</b> <i>({current_time})</i>\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 <b>СТАТИСТИКА ЗАКАЗОВ</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🆕 <b>Новые заказы:</b> <code>{len(new_orders):>8}</code>\n"
+            f"💰 <b>На проверке:</b> <code>{len(checking_orders):>10}</code>\n" 
+            f"✅ <b>Подтвержденные:</b> <code>{len(paid_orders):>6}</code>\n"
+            f"🚚 <b>В доставке:</b> <code>{len(shipping_orders):>9}</code>\n"
+            f"📦 <b>Всего товаров:</b> <code>{len(products):>7}</code>\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⚡ <b>Выберите действие для работы:</b>",
+            reply_markup=get_enhanced_admin_keyboard(),
+            parse_mode='HTML'
+        )
 
 # Управление товарами
 @router.callback_query(F.data == "admin_products", admin_filter)
@@ -347,8 +372,33 @@ async def process_product_no_photo(message: Message, state: FSMContext):
 # Управление заказами
 @router.callback_query(F.data == "admin_all_orders", admin_filter)
 async def admin_all_orders_menu(callback: CallbackQuery):
-    """Меню всех заказов для админа"""
-    orders = await db.get_all_orders(50)  # Показываем последние 50 заказов
+    """Меню всех заказов для админа с пагинацией"""
+    await admin_all_orders_page(callback, 1)
+
+@router.callback_query(F.data.startswith("admin_all_orders_page_"), admin_filter)
+async def admin_all_orders_pagination(callback: CallbackQuery):
+    """Пагинация для всех заказов админа"""
+    page = int(callback.data.split("_")[-1])
+    await admin_all_orders_page(callback, page)
+
+@router.callback_query(F.data == "admin_search_order", admin_filter)
+async def admin_search_order(callback: CallbackQuery, state: FSMContext):
+    """Начать поиск заказа по номеру"""
+    await state.set_state("waiting_order_search")
+    await callback.message.edit_text(
+        "🔍 <b>Поиск заказа</b>\n\n"
+        "Введите номер заказа для поиска:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Все заказы", callback_data="admin_all_orders")]
+        ]),
+        parse_mode='HTML'
+    )
+
+async def admin_all_orders_page(callback: CallbackQuery, page: int):
+    """Отобразить страницу всех заказов"""
+    from components.pagination import pagination
+    
+    orders = await db.get_all_orders()  # Получаем все заказы
     
     if not orders:
         text = "📋 <b>Все заказы</b>\n\nЗаказов пока нет."
@@ -357,7 +407,7 @@ async def admin_all_orders_menu(callback: CallbackQuery):
             await callback.message.edit_text(
                 text,
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text=_("common.to_admin"), callback_data="admin_panel")]
+                    [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")]
                 ]),
                 parse_mode='HTML'
             )
@@ -366,25 +416,163 @@ async def admin_all_orders_menu(callback: CallbackQuery):
             await callback.message.answer(
                 text,
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text=_("common.to_admin"), callback_data="admin_panel")]
+                    [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")]
                 ]),
                 parse_mode='HTML'
             )
         return
+
+    # Используем компонент пагинации (с настройкой 8 элементов на страницу)
+    pagination.items_per_page = 8
+    pagination_info = pagination.paginate(orders, page)
     
-    text = f"📋 <b>Все заказы</b>\n\nВсего: {len(orders)} заказов\n\nВыберите заказ:"
+    text = f"📋 <b>Все заказы</b>\n\n"
+    text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    text += f"📊 Всего заказов: <b>{len(orders)}</b>\n"
+    text += pagination.get_page_info_text(pagination_info, user_id=callback.from_user.id)
+    text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    
+    # Отображаем заказы текущей страницы
+    for order in pagination_info['items']:
+        status_emoji = "⏳" if order.status == "waiting_payment" else "💰" if order.status == "payment_check" else "✅" if order.status == "paid" else "🚚" if order.status == "shipping" else "📦" if order.status == "delivered" else "❌"
+        text += f"{status_emoji} <b>№{order.order_number}</b> - {order.total_price}₾\n"
+        text += f"📅 {order.created_at.strftime('%d.%m %H:%M')} | 👤 ID:{order.user_id}\n\n"
+
+    # Создаем клавиатуру с пагинацией
+    def order_button_generator(order, index):
+        status_emoji = "⏳" if order.status == "waiting_payment" else "💰" if order.status == "payment_check" else "✅" if order.status == "paid" else "🚚" if order.status == "shipping" else "📦" if order.status == "delivered" else "❌"
+        return InlineKeyboardButton(
+            text=f"{status_emoji} №{order.order_number} - {order.total_price}₾",
+            callback_data=f"admin_order_{order.id}"
+        )
+
+    additional_buttons = [
+        [InlineKeyboardButton(text="🔍 Поиск по номеру", callback_data="admin_search_order")],
+        [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")]
+    ]
+
+    keyboard = pagination.create_pagination_keyboard(
+        pagination_info=pagination_info,
+        callback_prefix="admin_all_orders_page",
+        user_id=callback.from_user.id,
+        item_button_generator=order_button_generator,
+        additional_buttons=additional_buttons
+    )
     
     try:
         await callback.message.edit_text(
             text,
-            reply_markup=get_admin_orders_keyboard(orders),
+            reply_markup=keyboard,
             parse_mode='HTML'
         )
     except Exception:
         await callback.message.delete()
         await callback.message.answer(
             text,
-            reply_markup=get_admin_orders_keyboard(orders),
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+
+@router.message(F.text, lambda message: message.from_user.id in ADMIN_IDS)
+async def process_admin_message(message: Message, state: FSMContext):
+    """Обработка сообщений от админа в зависимости от состояния"""
+    current_state = await state.get_state()
+    
+    if current_state == "waiting_order_search":
+        await process_order_search(message, state)
+    else:
+        # Если не в состоянии поиска, удаляем сообщение
+        await message.delete()
+
+async def process_order_search(message: Message, state: FSMContext):
+    """Обработка поиска заказа по номеру"""
+    order_number = message.text.strip()
+    
+    try:
+        
+        # Удаляем сообщение пользователя
+        await message.delete()
+        
+        # Проверяем, что введено число
+        if not order_number.isdigit():
+            await message.bot.send_message(
+                chat_id=message.chat.id,
+                text="🔍 <b>Ошибка</b>\n\n❌ Номер заказа должен содержать только цифры\n\nВведите правильный номер заказа:",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔙 Все заказы", callback_data="admin_all_orders")]
+                ]),
+                parse_mode='HTML'
+            )
+            return
+        
+        # Преобразуем в int и ищем заказ по номеру
+        order_number_int = int(order_number)
+        order = await db.get_order_by_number(order_number_int)
+        
+        if not order:
+            # Заказ не найден
+            text = f"🔍 <b>Результат поиска</b>\n\n"
+            text += f"❌ Заказ №{order_number} не найден\n\n"
+            text += f"Попробуйте другой номер заказа:"
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Все заказы", callback_data="admin_all_orders")]
+            ])
+        else:
+            # Заказ найден - показываем детали
+            await state.clear()
+            
+            # Получаем детали заказа  
+            order_items = await db.get_order_items(order.id)
+            
+            status_emoji = "⏳" if order.status == "waiting_payment" else "💰" if order.status == "payment_check" else "✅" if order.status == "paid" else "🚚" if order.status == "shipping" else "📦" if order.status == "delivered" else "❌"
+            
+            text = f"🔍 <b>Найден заказ</b>\n\n"
+            text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            text += f"{status_emoji} <b>Заказ №{order.order_number}</b>\n"
+            text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            text += f"👤 <b>Клиент ID:</b> {order.user_id}\n"
+            text += f"📅 <b>Дата:</b> {order.created_at.strftime('%d.%m.%Y %H:%M')}\n"
+            text += f"📊 <b>Статус:</b> {order.status}\n"
+            text += f"💰 <b>Сумма:</b> {order.total_price}₾\n\n"
+            
+            if order.phone:
+                text += f"📞 <b>Контакт:</b> {order.phone}\n"
+            if order.address:
+                text += f"📍 <b>Адрес:</b> {order.address}\n"
+            
+            text += f"\n<b>📦 Товары:</b>\n"
+            for item in order_items:
+                text += f"• {item.product_name} × {item.quantity} = {item.price * item.quantity}₾\n"
+            
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔧 Управлять заказом", callback_data=f"admin_order_{order.id}")],
+                [InlineKeyboardButton(text="🔙 Все заказы", callback_data="admin_all_orders")]
+            ])
+        
+        # Отправляем новое сообщение (проще и надежнее)
+        await message.bot.send_message(
+            chat_id=message.chat.id,
+            text=text,
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+        
+        if not order:
+            # Если заказ не найден, остаемся в состоянии поиска
+            return
+            
+    except Exception as e:
+        import traceback
+        print(f"❌ ПОЛНАЯ ОШИБКА: {traceback.format_exc()}")  # Для точного понимания где ошибка
+        await state.clear()
+        await message.bot.send_message(
+            chat_id=message.chat.id,
+            text=f"❌ Ошибка при поиске заказа: {str(e)}\n\nПопробуйте еще раз.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Все заказы", callback_data="admin_all_orders")]
+            ]),
             parse_mode='HTML'
         )
 
@@ -1174,8 +1362,29 @@ async def quick_reject_payment(callback: CallbackQuery):
 # Обработчики фильтрованных заказов
 @router.callback_query(F.data.startswith("admin_orders_"), admin_filter)
 async def show_filtered_orders(callback: CallbackQuery):
-    """Показать заказы по категориям"""
-    filter_type = callback.data.split("_")[2]  # new, checking, paid, etc.
+    """Показать заказы по категориям с пагинацией"""
+    parts = callback.data.split("_")
+    filter_type = parts[2]  # new, checking, paid, etc.
+    
+    # Проверяем есть ли указание страницы
+    if len(parts) > 3 and parts[3] == "page":
+        page = int(parts[4])
+    else:
+        page = 1
+    
+    await show_filtered_orders_page(callback, filter_type, page)
+
+@router.callback_query(F.data.startswith("admin_orders_page_"), admin_filter)
+async def show_filtered_orders_pagination(callback: CallbackQuery):
+    """Пагинация для фильтрованных заказов админа"""
+    parts = callback.data.split("_")
+    filter_type = parts[3]  # new, checking, paid, etc.
+    page = int(parts[4])
+    await show_filtered_orders_page(callback, filter_type, page)
+
+async def show_filtered_orders_page(callback: CallbackQuery, filter_type: str, page: int):
+    """Отобразить страницу фильтрованных заказов"""
+    from components.pagination import pagination
     
     # Получаем заказы в зависимости от фильтра
     if filter_type == "new":
@@ -1201,20 +1410,37 @@ async def show_filtered_orders(callback: CallbackQuery):
         title = "📋 Все заказы"
     
     if not orders:
-        await callback.message.edit_text(
-            f"{title}\n\nЗаказов не найдено.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔄 Обновить", callback_data=callback.data)],
-                [InlineKeyboardButton(text=_("common.to_admin"), callback_data="admin_panel")]
-            ]),
-            parse_mode='HTML'
-        )
+        try:
+            await callback.message.edit_text(
+                f"{title}\n\nЗаказов не найдено.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text=_("common.to_admin"), callback_data="admin_panel")]
+                ]),
+                parse_mode='HTML'
+            )
+        except Exception:
+            await callback.message.delete()
+            await callback.message.answer(
+                f"{title}\n\nЗаказов не найдено.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text=_("common.to_admin"), callback_data="admin_panel")]
+                ]),
+                parse_mode='HTML'
+            )
         return
+
+    # Используем компонент пагинации (с настройкой 6 элементов на страницу)
+    pagination.items_per_page = 6
+    pagination_info = pagination.paginate(orders, page)
     
-    text = f"<b>{title}</b>\n\nВсего заказов: {len(orders)}\n\n"
+    text = f"{title}\n\n"
+    text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    text += f"📊 Всего заказов: <b>{len(orders)}</b>\n"
+    text += pagination.get_page_info_text(pagination_info, user_id=callback.from_user.id)
+    text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     
-    # Показываем последние 10 заказов
-    for order in orders[:10]:
+    # Отображаем заказы текущей страницы
+    for order in pagination_info['items']:
         status_emoji = {
             'waiting_payment': '⏳',
             'payment_check': '💰',
@@ -1225,28 +1451,48 @@ async def show_filtered_orders(callback: CallbackQuery):
         }
         
         emoji = status_emoji.get(order.status, '❓')
-        text += f"{emoji} Заказ #{order.order_number} - {order.total_price}₾\n"
-        text += f"   {str(order.created_at)[:16]} - ID: {order.user_id}\n\n"
-    
-    if len(orders) > 10:
-        text += f"... и еще {len(orders) - 10} заказов"
-    
-    # Создаем клавиатуру с заказами
-    keyboard = []
-    for order in orders[:10]:
-        keyboard.append([
-            InlineKeyboardButton(
-                text=f"📋 Заказ #{order.order_number}",
-                callback_data=f"admin_order_{order.id}"
-            )
-        ])
-    
-    keyboard.append([InlineKeyboardButton(text="🔄 Обновить", callback_data=callback.data)])
-    keyboard.append([InlineKeyboardButton(text=_("common.to_admin"), callback_data="admin_panel")])
-    
-    await callback.message.edit_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
-        parse_mode='HTML'
+        text += f"{emoji} <b>№{order.order_number}</b> - {order.total_price}₾\n"
+        text += f"📅 {order.created_at.strftime('%d.%m %H:%M')} | 👤 ID:{order.user_id}\n\n"
+
+    # Создаем клавиатуру с пагинацией
+    def order_button_generator(order, index):
+        status_emoji = {
+            'waiting_payment': '⏳',
+            'payment_check': '💰',
+            'paid': '✅',
+            'shipping': '🚚',
+            'delivered': '📦',
+            'cancelled': '❌'
+        }
+        emoji = status_emoji.get(order.status, '❓')
+        return InlineKeyboardButton(
+            text=f"{emoji} №{order.order_number} - {order.total_price}₾",
+            callback_data=f"admin_order_{order.id}"
+        )
+
+    additional_buttons = [
+        [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")]
+    ]
+
+    keyboard = pagination.create_pagination_keyboard(
+        pagination_info=pagination_info,
+        callback_prefix=f"admin_orders_page_{filter_type}",
+        user_id=callback.from_user.id,
+        item_button_generator=order_button_generator,
+        additional_buttons=additional_buttons
     )
+    
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+    except Exception:
+        await callback.message.delete()
+        await callback.message.answer(
+            text,
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
 

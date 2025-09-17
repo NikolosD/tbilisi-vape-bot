@@ -99,8 +99,8 @@ class OrdersPage(BasePage):
         text += f"📅 <b>{_('orders.created', user_id=user_id)}</b> {order.created_at.strftime('%d.%m.%Y %H:%M')}\n"
         text += f"📊 <b>{_('orders.status', user_id=user_id)}</b> {status_text}\n\n"
         
-        if order.contact:
-            text += f"📞 <b>{_('orders.contact', user_id=user_id)}</b> {order.contact}\n"
+        if order.phone:
+            text += f"📞 <b>{_('orders.contact', user_id=user_id)}</b> {order.phone}\n"
         if order.address:
             text += f"📍 <b>{_('orders.address', user_id=user_id)}</b> {order.address}\n"
         
@@ -110,8 +110,6 @@ class OrdersPage(BasePage):
         
         text += f"\n💰 <b>{_('orders.total', user_id=user_id)}</b> {order.total_price}₾"
         
-        if order.admin_comment:
-            text += f"\n\n💬 <b>{_('orders.admin_comment', user_id=user_id)}</b>\n{order.admin_comment}"
         
         return {
             'text': text,
