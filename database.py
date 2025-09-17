@@ -213,7 +213,7 @@ class Database:
             await self.execute(query, quantity, user_id, product_id)
     
     # Методы для работы с заказами
-    async def create_order(self, user_id, products, total_price, delivery_zone, delivery_price, phone, address):
+    async def create_order(self, user_id, products, total_price, delivery_zone, delivery_price, phone, address, latitude=None, longitude=None):
         """Создание заказа"""
         import random
         
@@ -226,15 +226,15 @@ class Database:
                 break
         
         query = """
-        INSERT INTO orders (order_number, user_id, products, total_price, delivery_zone, delivery_price, phone, address) 
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, order_number
+        INSERT INTO orders (order_number, user_id, products, total_price, delivery_zone, delivery_price, phone, address, latitude, longitude) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, order_number
         """
         # Преобразуем цены в float для корректной сериализации
         total_price_float = float(total_price)
         delivery_price_float = float(delivery_price)
         
         result = await self.fetchone(query, order_number, user_id, json.dumps(products), total_price_float, 
-                                   delivery_zone, delivery_price_float, phone, address)
+                                   delivery_zone, delivery_price_float, phone, address, latitude, longitude)
         return result['order_number']  # Возвращаем order_number вместо id
     
     async def get_order(self, order_id) -> Optional[Order]:
@@ -409,6 +409,8 @@ async def init_db():
         delivery_price DECIMAL(10,2),
         phone TEXT,
         address TEXT,
+        latitude DECIMAL(10,8),
+        longitude DECIMAL(11,8),
         status TEXT DEFAULT 'waiting_payment',
         payment_screenshot TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -420,6 +422,13 @@ async def init_db():
         await conn.execute('ALTER TABLE orders ADD COLUMN order_number INTEGER UNIQUE')
     except:
         pass  # Поле уже существует
+    
+    # Добавляем поля координат если их нет (для существующих баз)
+    try:
+        await conn.execute('ALTER TABLE orders ADD COLUMN latitude DECIMAL(10,8)')
+        await conn.execute('ALTER TABLE orders ADD COLUMN longitude DECIMAL(11,8)')
+    except:
+        pass  # Поля уже существуют
     
     # Таблица корзины
     await conn.execute('''CREATE TABLE IF NOT EXISTS cart (

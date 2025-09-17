@@ -18,8 +18,12 @@
   },
   
   "product": {
-    "price": "💰 Price: {price}₾",
+    "price": "Price:",
     "description": "📝 Description:",
+    "in_stock": "In stock",
+    "out_of_stock": "Out of stock", 
+    "pieces": "pcs.",
+    "in_cart_quantity": "In cart:",
     "in_cart": "🛒 Already in cart",
     "add_to_cart": "🛒 Add to cart",
     "remove_from_cart": "❌ Remove from cart",
@@ -39,7 +43,8 @@
     "quantity_updated": "✅ Quantity updated",
     "quantity_increased": "✅ Quantity increased to {quantity}",
     "quantity_decreased": "✅ Quantity decreased to {quantity}",
-    "item_deleted": "✅ Item removed from cart"
+    "item_deleted": "✅ Item removed from cart",
+    "quantity_set": "✅ Quantity updated: {quantity} pcs."
   },
   
   "orders": {
@@ -67,9 +72,12 @@
   },
   
   "checkout": {
-    "delivery_zones": "🚚 <b>Choose delivery zone:</b>",
-    "zone_info": "🚚 <b>Zone:</b> {name}\n💰 <b>Delivery cost:</b> {price}₾\n⏱ <b>Delivery time:</b> {time}",
-    "enter_address": "Enter delivery address:",
+    "location_request": "📍 <b>Specify delivery location</b>\n\n💰 Items total: {total}₾\n\nYou can:\n• Share your geolocation\n• Send location on map\n• Enter address manually",
+    "share_location": "📍 Share location",
+    "manual_address": "✍️ Enter address manually",
+    "location_received": "✅ <b>Location received</b>\n\n📍 Coordinates: {lat}, {lon}",
+    "enter_exact_address": "📝 <b>Enter exact delivery address:</b>\n\n<i>Example: street, house, apartment, entrance</i>",
+    "enter_address": "📝 <b>Enter delivery address:</b>\n\n<i>Example: street, house, apartment, entrance</i>",
     "contact_request": "📱 <b>Contact Information</b>\n\nShare your phone number for contact:",
     "order_created": "✅ <b>Order created!</b>\n\n📋 <b>Order number:</b> #{order_id}\n💰 <b>Amount to pay:</b> {total}₾\n\n💳 <b>Payment methods:</b>\n{payment_info}\n\n📸 <b>Send payment screenshot after payment</b>",
     "order_error": "❌ Error creating order. Please try again."
@@ -165,7 +173,12 @@
     "product_unavailable": "❌ Product unavailable",
     "min_order_amount": "❌ Minimum order amount {amount}₾",
     "user_creation_failed": "❌ Error: failed to create user. Try /start",
-    "order_creation_error": "❌ Error creating order. Please try again."
+    "order_creation_error": "❌ Error creating order. Please try again.",
+    "quantity_range": "❌ Quantity must be between 1 and 999. Try again:",
+    "stock_limit": "❌ Only {stock} pcs in stock. Try again:",
+    "invalid_number": "❌ Enter a valid number from 1 to 999:",
+    "product_not_found": "❌ Error: product not found",
+    "quantity_input_cancelled": "❌ Quantity input cancelled"
   },
 
   "welcome": {
@@ -177,5 +190,22 @@
     "header": "📨 Message from administrator",
     "order_prefix": "📋 Regarding order #",
     "footer": "To reply, use the \"Contact\" button in the main menu"
+  },
+
+  "admin_notifications": {
+    "new_order": "🔔 <b>New order #{order_number}</b>",
+    "user": "👤 <b>User:</b>",
+    "amount": "💰 <b>Amount:</b>",
+    "address": "📍 <b>Address:</b>",
+    "coordinates": "🗺️ <b>Coordinates:</b>",
+    "order_content": "📦 <b>Order contents:</b>",
+    "delivery": "🚚 <b>Delivery:</b>",
+    "phone": "📱 <b>Phone:</b>",
+    "order_date": "📅 <b>Order date:</b>",
+    "payment_screenshot": "💳 <b>Payment screenshot attached</b>",
+    "awaiting_verification": "⏳ <b>Awaiting verification</b>",
+    "unknown": "Unknown",
+    "no_username": "none",
+    "by_coordinates": "By coordinates"
   }
 }

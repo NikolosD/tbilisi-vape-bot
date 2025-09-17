@@ -14,8 +14,9 @@ from message_manager import message_manager
 logger = logging.getLogger(__name__)
 from keyboards import (
     get_main_menu, get_main_menu_inline, get_categories_keyboard, get_catalog_keyboard, get_category_products_keyboard, get_product_card_keyboard,
-    get_cart_keyboard, get_delivery_zones_keyboard, get_order_confirmation_keyboard,
-    get_orders_keyboard, get_order_details_keyboard, get_contact_keyboard, get_language_keyboard, get_back_to_menu_keyboard
+    get_cart_keyboard, get_location_request_keyboard, get_location_inline_keyboard, get_order_confirmation_keyboard,
+    get_orders_keyboard, get_order_details_keyboard, get_contact_keyboard, get_language_keyboard, get_back_to_menu_keyboard,
+    get_quantity_input_cancel_keyboard
 )
 import i18n
 from i18n import _
@@ -31,9 +32,11 @@ router = Router()
 # Состояния для FSM
 class OrderStates(StatesGroup):
     waiting_contact = State()
+    waiting_location = State()
     waiting_address = State()
     waiting_payment_screenshot = State()
     waiting_admin_message = State()
+    waiting_quantity_input = State()
 
 # Обработчик текстовых сообщений из главного меню
 @router.message(is_catalog_button)
@@ -239,7 +242,13 @@ async def cart_increase(callback: CallbackQuery):
             
             # Обновляем сообщение
             keyboard = get_product_card_keyboard(product_id, in_cart=True, from_category=from_category)
-            await callback.message.edit_text(product_text, reply_markup=keyboard, parse_mode='HTML')
+            try:
+                await callback.message.edit_text(product_text, reply_markup=keyboard, parse_mode='HTML')
+            except Exception as e:
+                print(f"DEBUG: Не удалось отредактировать сообщение: {e}")
+                # Если не удалось отредактировать, отправляем новое
+                await callback.message.delete()
+                await callback.message.answer(product_text, reply_markup=keyboard, parse_mode='HTML')
 
 @router.callback_query(F.data.startswith("cart_decrease_"))
 async def cart_decrease(callback: CallbackQuery):
@@ -302,7 +311,13 @@ async def cart_decrease(callback: CallbackQuery):
             
             # Определяем правильную клавиатуру в зависимости от количества
             keyboard = get_product_card_keyboard(product_id, in_cart=(quantity_in_cart > 0), from_category=from_category)
-            await callback.message.edit_text(product_text, reply_markup=keyboard, parse_mode='HTML')
+            try:
+                await callback.message.edit_text(product_text, reply_markup=keyboard, parse_mode='HTML')
+            except Exception as e:
+                print(f"DEBUG: Не удалось отредактировать сообщение: {e}")
+                # Если не удалось отредактировать, отправляем новое
+                await callback.message.delete()
+                await callback.message.answer(product_text, reply_markup=keyboard, parse_mode='HTML')
 
 @router.callback_query(F.data.startswith("cart_remove_"))
 async def cart_remove(callback: CallbackQuery):
@@ -390,6 +405,219 @@ async def clear_cart(callback: CallbackQuery):
         menu_state='cart_cleared'
     )
 
+# Обработчик для ввода количества
+@router.callback_query(F.data.startswith("set_quantity_"))
+async def set_quantity(callback: CallbackQuery, state: FSMContext):
+    """Установить количество товара"""
+    product_id = int(callback.data.split("_")[2])
+    user_id = callback.from_user.id
+    
+    # Извлекаем from_category из клавиатуры
+    from_category = None
+    if callback.message.reply_markup:
+        for row in callback.message.reply_markup.inline_keyboard:
+            for button in row:
+                if button.callback_data and button.callback_data.startswith("category_"):
+                    from_category = int(button.callback_data.split("_")[1])
+                    break
+    
+    # Сохраняем информацию о товаре в состоянии
+    await state.update_data(
+        product_id=product_id,
+        original_message_id=callback.message.message_id,
+        original_text=callback.message.text,
+        original_markup=callback.message.reply_markup,
+        from_category=from_category  # Сохраняем категорию для правильного возврата
+    )
+    
+    # Редактируем сообщение и сохраняем его ID для последующего удаления
+    quantity_message = await callback.message.edit_text(
+        "🔢 <b>Введите количество товара:</b>\n\n"
+        "📝 Отправьте число от 1 до 999",
+        reply_markup=get_quantity_input_cancel_keyboard(),
+        parse_mode='HTML'
+    )
+    
+    # Обновляем state с ID сообщения для ввода количества
+    await state.update_data(quantity_message_id=quantity_message.message_id)
+    
+    await state.set_state(OrderStates.waiting_quantity_input)
+
+@router.callback_query(F.data.startswith("cancel_quantity_") & ~F.data.endswith("_input"))
+async def cancel_quantity(callback: CallbackQuery, state: FSMContext):
+    """Отменить ввод количества"""
+    product_id = int(callback.data.split("_")[2])
+    
+    # Восстанавливаем исходное сообщение
+    data = await state.get_data()
+    if 'original_text' in data and 'original_markup' in data:
+        await callback.message.edit_text(
+            data['original_text'],
+            reply_markup=data['original_markup'],
+            parse_mode='HTML'
+        )
+    
+    await state.clear()
+    await callback.answer("❌ Ввод количества отменен")
+
+@router.message(OrderStates.waiting_quantity_input)
+async def process_quantity_input(message: Message, state: FSMContext):
+    """Обработка ввода количества"""
+    user_id = message.from_user.id
+    data = await state.get_data()
+    product_id = data.get('product_id')
+    
+    if not product_id:
+        await message.answer("❌ Ошибка: не найден товар")
+        await state.clear()
+        return
+    
+    try:
+        quantity = int(message.text.strip())
+        
+        if quantity < 1 or quantity > 999:
+            await message.answer(
+                _("error.quantity_range", user_id=user_id),
+                reply_markup=get_quantity_input_cancel_keyboard()
+            )
+            return
+        
+        # Проверяем товар и его наличие
+        product = await db.get_product(product_id)
+        if not product or not product.in_stock:
+            await message.answer(_("error.product_unavailable", user_id=user_id))
+            await state.clear()
+            return
+        
+        if quantity > product.stock_quantity:
+            await message.answer(
+                _("error.stock_limit", user_id=user_id, stock=product.stock_quantity),
+                reply_markup=get_quantity_input_cancel_keyboard()
+            )
+            return
+        
+        # Обновляем количество в корзине
+        await db.update_cart_quantity(user_id, product_id, quantity)
+        
+        # Удаляем сообщение пользователя
+        await message.delete()
+        
+        # Удаляем сообщение с инструкцией ввода количества
+        quantity_message_id = data.get('quantity_message_id')
+        if quantity_message_id:
+            try:
+                await message.bot.delete_message(chat_id=user_id, message_id=quantity_message_id)
+            except Exception:
+                pass  # Сообщение уже могло быть удалено
+        
+        # Получаем обновленную информацию о корзине
+        cart_items = await db.get_cart(user_id)
+        quantity_in_cart = 0
+        for item in cart_items:
+            if item.product_id == product_id:
+                quantity_in_cart = item.quantity
+                break
+        
+        # Формируем обновленный текст товара
+        product_text = f"🛍️ {product.name}\n\n"
+        product_text += f"{product.description}\n\n"
+        product_text += f"💰 Цена: {product.price}₾\n"
+        product_text += f"📦 {'В наличии' if product.in_stock else 'Нет в наличии'}\n"
+        if quantity_in_cart > 0:
+            product_text += f"🛒 В корзине: {quantity_in_cart} шт."
+        
+        # Получаем from_category из данных состояния или сообщения
+        from_category = data.get('from_category')
+        if not from_category and data.get('original_markup'):
+            for row in data['original_markup'].inline_keyboard:
+                for button in row:
+                    if button.callback_data and button.callback_data.startswith("category_"):
+                        from_category = int(button.callback_data.split("_")[1])
+                        break
+        
+        # Отправляем новое сообщение (по ID из данных состояния)
+        original_message_id = data.get('original_message_id')
+        
+        try:
+            await message.bot.edit_message_text(
+                chat_id=user_id,
+                message_id=original_message_id,
+                text=product_text,
+                reply_markup=get_product_card_keyboard(product_id, in_cart=True, from_category=from_category),
+                parse_mode='HTML'
+            )
+        except Exception:
+            # Если не удалось отредактировать, отправляем новое сообщение
+            await message.answer(
+                product_text,
+                reply_markup=get_product_card_keyboard(product_id, in_cart=True, from_category=from_category),
+                parse_mode='HTML'
+            )
+        
+        
+    except ValueError:
+        await message.answer(
+            _("error.invalid_number", user_id=user_id),
+            reply_markup=get_quantity_input_cancel_keyboard()
+        )
+        return
+    
+    await state.clear()
+
+@router.callback_query(F.data == "cancel_quantity_input", OrderStates.waiting_quantity_input)
+async def cancel_quantity_input(callback: CallbackQuery, state: FSMContext):
+    """Отмена ввода количества"""
+    user_id = callback.from_user.id
+    data = await state.get_data()
+    product_id = data.get('product_id')
+    
+    await state.clear()
+    
+    if not product_id:
+        await callback.answer(_("error.product_not_found", user_id=user_id))
+        return
+    
+    # Получаем товар и информацию о корзине
+    product = await db.get_product(product_id)
+    if not product:
+        await callback.answer(_("error.product_not_found", user_id=user_id))
+        return
+    
+    cart_items = await db.get_cart(user_id)
+    quantity_in_cart = 0
+    for item in cart_items:
+        if item.product_id == product_id:
+            quantity_in_cart = item.quantity
+            break
+    
+    # Формируем текст товара
+    product_text = f"🛍️ {product.name}\n\n"
+    product_text += f"{product.description}\n\n"
+    product_text += f"💰 {_('product.price', user_id=user_id)} {product.price}₾\n"
+    product_text += f"📦 {_('product.in_stock', user_id=user_id) if product.in_stock else _('product.out_of_stock', user_id=user_id)}\n"
+    if quantity_in_cart > 0:
+        product_text += f"🛒 {_('product.in_cart_quantity', user_id=user_id)} {quantity_in_cart} {_('product.pieces', user_id=user_id)}"
+    
+    # Получаем from_category из данных состояния
+    from_category = data.get('from_category')
+    
+    # Обновляем сообщение
+    try:
+        await callback.message.edit_text(
+            product_text,
+            reply_markup=get_product_card_keyboard(product_id, in_cart=(quantity_in_cart > 0), from_category=from_category),
+            parse_mode='HTML'
+        )
+    except Exception:
+        # Если не удалось отредактировать, отправляем новое сообщение
+        await callback.message.answer(
+            product_text,
+            reply_markup=get_product_card_keyboard(product_id, in_cart=(quantity_in_cart > 0), from_category=from_category),
+            parse_mode='HTML'
+        )
+    
+    await callback.answer(_("error.quantity_input_cancelled", user_id=user_id))
+
 @router.callback_query(F.data == "checkout")
 async def start_checkout(callback: CallbackQuery, state: FSMContext):
     """Начать оформление заказа"""
@@ -409,54 +637,125 @@ async def start_checkout(callback: CallbackQuery, state: FSMContext):
         )
         return
     
-    # Показываем зоны доставки
-    await callback.message.edit_text(
-        f"🚚 <b>Выберите зону доставки</b>\n\n💰 Сумма товаров: {total}₾",
-        reply_markup=get_delivery_zones_keyboard(),
+    # Удаляем inline сообщение и отправляем новое с Reply клавиатурой
+    await callback.message.delete()
+    
+    print(f"DEBUG: Пользователь {user_id} начал checkout, отправляем Reply клавиатуру")
+    
+    await callback.message.answer(
+        _("checkout.location_request", user_id=user_id).format(total=total),
+        reply_markup=get_location_request_keyboard(user_id=user_id),
         parse_mode='HTML'
     )
+    
+    await state.set_state(OrderStates.waiting_location)
+    await state.update_data(total=total)
+    
+    print(f"DEBUG: Состояние установлено на waiting_location для пользователя {user_id}")
 
-@router.callback_query(F.data.startswith("delivery_"))
-async def select_delivery(callback: CallbackQuery, state: FSMContext):
-    """Выбрать зону доставки"""
-    zone_id = callback.data.split("_")[1]
-    zone_info = DELIVERY_ZONES[zone_id]
+# Обработчик геолокации (ДОЛЖЕН БЫТЬ ВЫШЕ ТЕКСТОВОГО!)
+@router.message(OrderStates.waiting_location, F.location)
+async def process_location(message: Message, state: FSMContext):
+    """Обработка полученной геолокации"""
+    user_id = message.from_user.id
+    location = message.location
     
-    # Сохраняем выбранную зону
-    await state.update_data(delivery_zone=zone_id)
+    current_state = await state.get_state()
+    print(f"DEBUG: Получена геолокация от пользователя {user_id}: lat={location.latitude}, lon={location.longitude}")
+    print(f"DEBUG: Текущее состояние пользователя {user_id}: {current_state}")
     
-    # Проверяем контактные данные пользователя
-    user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    # Убираем Reply клавиатуру
+    from aiogram.types import ReplyKeyboardRemove
     
-    if not user.phone:  # Если нет номера телефона
-        # Удаляем сообщение и отправляем новое с ReplyKeyboard
-        await callback.message.delete()
-        await callback.message.answer(
-            "📱 <b>Укажите номер телефона</b>\n\nДля оформления заказа нам нужен ваш номер телефона:",
-            reply_markup=get_contact_keyboard(),
+    # Сохраняем координаты
+    await state.update_data(
+        latitude=location.latitude,
+        longitude=location.longitude
+    )
+    
+    await message.answer(
+        _("checkout.location_received", user_id=user_id).format(
+            lat=location.latitude,
+            lon=location.longitude
+        ),
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode='HTML'
+    )
+    
+    # Переходим к вводу точного адреса
+    await message.answer(
+        _("checkout.enter_exact_address", user_id=user_id),
+        parse_mode='HTML'
+    )
+    
+    await state.set_state(OrderStates.waiting_address)
+
+# Обработчик для текстовой кнопки "Ввести адрес вручную" из Reply клавиатуры
+@router.message(OrderStates.waiting_location, F.text)
+async def handle_manual_address_text(message: Message, state: FSMContext):
+    """Обработка нажатия кнопки 'Ввести адрес вручную' в Reply клавиатуре"""
+    user_id = message.from_user.id
+    
+    print(f"DEBUG: Получен текст от пользователя {user_id}: '{message.text}'")
+    
+    # Проверяем, что это именно кнопка "Ввести адрес вручную"
+    if message.text == _("checkout.manual_address", user_id=user_id):
+        # Убираем Reply клавиатуру и отправляем сообщение с запросом адреса
+        from aiogram.types import ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
+        
+        await message.answer(
+            _("checkout.enter_address", user_id=user_id),
+            reply_markup=ReplyKeyboardRemove(),
             parse_mode='HTML'
-        )
-        await state.set_state(OrderStates.waiting_contact)
-    else:
-        # Если есть контакт, запрашиваем адрес
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-        cancel_keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="❌ Отменить", callback_data="cart")]]
         )
         
-        await callback.message.edit_text(
-            f"📍 <b>Укажите адрес доставки</b>\n\n"
-            f"🚚 Зона: {zone_info['name']}\n"
-            f"💰 Стоимость доставки: {zone_info['price']}₾\n"
-            f"⏱ Время доставки: {zone_info['time']}\n\n"
-            f"Напишите точный адрес доставки:",
-            reply_markup=cancel_keyboard,
+        await message.answer(
+            "👆 Введите адрес в следующем сообщении:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=_("common.back", user_id=user_id), callback_data="cart")]
+            ])
+        )
+        
+        await state.set_state(OrderStates.waiting_address)
+    elif message.text == "🗺️ Отправить точку на карте":
+        # Инструкция по отправке геолокации вручную
+        from aiogram.types import ReplyKeyboardRemove
+        
+        await message.answer(
+            "📍 <b>Отправьте свою геопозицию:</b>\n\n"
+            "1️⃣ Нажмите на скрепку 📎\n"
+            "2️⃣ Выберите «Геопозиция» 🌍\n"
+            "3️⃣ Отправьте вашу текущую позицию или выберите точку на карте\n\n"
+            "<i>Или используйте кнопки ниже:</i>",
+            reply_markup=get_location_request_keyboard(user_id=user_id),
             parse_mode='HTML'
         )
-        # Сохраняем ID сообщения с запросом адреса в менеджере
-        message_manager.set_user_message(user_id, callback.message.message_id, 'waiting_address')
-        await state.set_state(OrderStates.waiting_address)
+    else:
+        # Если это не кнопка, а произвольный текст, возможно это адрес
+        await message.answer(
+            "📍 Пожалуйста, используйте кнопки ниже или отправьте геолокацию:",
+            reply_markup=get_location_request_keyboard(user_id=user_id)
+        )
+
+# Обработчик для старой inline кнопки (оставим для совместимости)
+@router.callback_query(F.data == "manual_address")
+async def manual_address(callback: CallbackQuery, state: FSMContext):
+    """Ввод адреса вручную (inline кнопка)"""
+    user_id = callback.from_user.id
+    
+    await callback.message.edit_text(
+        _("checkout.enter_address", user_id=user_id),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=_("common.back", user_id=user_id), callback_data="cart")]
+        ]),
+        parse_mode='HTML'
+    )
+    
+    await state.set_state(OrderStates.waiting_address)
+
+# Дублированный обработчик геолокации удален
+
+# Старый обработчик delivery зон удален - теперь используется геолокация
 
 @router.message(OrderStates.waiting_contact, F.content_type == 'contact')
 async def process_contact(message: Message, state: FSMContext):
@@ -496,13 +795,18 @@ async def process_address(message: Message, state: FSMContext):
     data = await state.get_data()
     logger.info(f"Данные состояния: {data}")
     
-    if 'delivery_zone' not in data:
+    # Проверяем есть ли общая сумма
+    if 'total' not in data:
         await message.answer(_("common.error"))
         await state.clear()
         return
-        
-    zone_id = data['delivery_zone']
-    zone_info = DELIVERY_ZONES[zone_id]
+    
+    # Координаты (если были отправлены)
+    latitude = data.get('latitude')
+    longitude = data.get('longitude')
+    
+    # Стандартная стоимость доставки (можно настроить в зависимости от расстояния)
+    delivery_price = 10  # 10₾ по умолчанию
     
     # Получаем корзину и пользователя
     cart_items = await db.get_cart(user_id)
@@ -535,7 +839,6 @@ async def process_address(message: Message, state: FSMContext):
     
     # Вычисляем стоимость
     items_total = sum(float(item.quantity * item.price) for item in cart_items)
-    delivery_price = float(zone_info['price'])
     total_price = items_total + delivery_price
     
     logger.info(f"Стоимость заказа: товары={items_total}, доставка={delivery_price}, итого={total_price}")
@@ -558,10 +861,12 @@ async def process_address(message: Message, state: FSMContext):
             user_id=user_id,
             products=products_data,
             total_price=total_price,
-            delivery_zone=zone_id,
+            delivery_zone="custom",  # Заменяем на кастомную зону
             delivery_price=delivery_price,
             phone=phone,
-            address=address
+            address=address,
+            latitude=latitude,
+            longitude=longitude
         )
         logger.info(f"Заказ создан с ID: {order_id}")
     except Exception as e:
@@ -582,8 +887,13 @@ async def process_address(message: Message, state: FSMContext):
     for item in products_data:
         order_text += f"• {item['name']} × {item['quantity']} = {item['price'] * item['quantity']}₾\n"
     
+    # Формируем информацию о доставке
+    delivery_info = "По координатам"
+    if latitude and longitude:
+        delivery_info = f"По координатам ({latitude:.6f}, {longitude:.6f})"
+    
     order_text += f"""
-🚚 <b>Доставка:</b> {zone_info['name']} - {delivery_price}₾
+🚚 <b>Доставка:</b> {delivery_info} - {delivery_price}₾
 📍 <b>Адрес:</b> {address}
 📱 <b>Телефон:</b> {phone}
 
@@ -701,29 +1011,41 @@ async def process_payment_screenshot(message: Message, state: FSMContext):
     # Получаем информацию о пользователе
     user = await db.get_user(message.from_user.id)
     
-    # Формируем красивое уведомление
-    admin_text = f"""🔔 <b>Новый заказ #{order.order_number}</b>
+    # Формируем красивое уведомление с переводами
+    admin_lang = 'ru'  # Язык администратора
+    
+    admin_text = f"""{_("admin_notifications.new_order", user_id=617646449).format(order_number=order.order_number)}
 
-👤 <b>Пользователь:</b> {message.from_user.first_name or 'Неизвестно'} (@{message.from_user.username or 'нет'})
-💰 <b>Сумма:</b> {order.total_price}₾
-📍 <b>Адрес:</b> {order.address}
-
-📦 <b>Состав заказа:</b>
+{_("admin_notifications.user", user_id=617646449)} {message.from_user.first_name or _("admin_notifications.unknown", user_id=617646449)} (@{message.from_user.username or _("admin_notifications.no_username", user_id=617646449)})
+{_("admin_notifications.amount", user_id=617646449)} {order.total_price}₾
+{_("admin_notifications.address", user_id=617646449)} {order.address}
 """
+
+    # Добавляем координаты если есть
+    if latitude and longitude:
+        admin_text += f"{_('admin_notifications.coordinates', user_id=617646449)} {latitude:.6f}, {longitude:.6f}\n"
+    
+    admin_text += f"\n{_('admin_notifications.order_content', user_id=617646449)}\n"
     
     for product in products:
         admin_text += f"• {product['name']} × {product['quantity']} = {product['price'] * product['quantity']}₾\n"
     
-    # Информация о доставке
-    zone_info = DELIVERY_ZONES.get(order.delivery_zone, {'name': 'Неизвестно'})
+    # Информация о доставке с учетом геолокации
+    if order.delivery_zone == "custom":
+        delivery_info = _("admin_notifications.by_coordinates", user_id=617646449)
+        if latitude and longitude:
+            delivery_info = f"{_('admin_notifications.by_coordinates', user_id=617646449)} ({latitude:.6f}, {longitude:.6f})"
+    else:
+        zone_info = DELIVERY_ZONES.get(order.delivery_zone, {'name': _("admin_notifications.unknown", user_id=617646449)})
+        delivery_info = zone_info['name']
     
     admin_text += f"""
-🚚 <b>Доставка:</b> {zone_info['name']} - {order.delivery_price}₾
-📱 <b>Телефон:</b> {order.phone}
-📅 <b>Дата заказа:</b> {str(order.created_at)[:16]}
+{_("admin_notifications.delivery", user_id=617646449)} {delivery_info} - {order.delivery_price}₾
+{_("admin_notifications.phone", user_id=617646449)} {order.phone}
+{_("admin_notifications.order_date", user_id=617646449)} {str(order.created_at)[:16]}
 
-💳 <b>Скриншот оплаты приложен</b>
-⏳ <b>Ожидает проверки</b>"""
+{_("admin_notifications.payment_screenshot", user_id=617646449)}
+{_("admin_notifications.awaiting_verification", user_id=617646449)}"""
     
     # Импортируем клавиатуру быстрых действий
     from keyboards import get_payment_notification_keyboard
@@ -1032,3 +1354,20 @@ async def callback_main_menu(callback: CallbackQuery):
             reply_markup=get_main_menu_inline(is_admin=is_admin, user_id=user_id),
             parse_mode='HTML'
         )
+
+# Общий отладочный обработчик для всех сообщений в состоянии waiting_location (ДОЛЖЕН БЫТЬ ПОСЛЕДНИМ!)
+@router.message(OrderStates.waiting_location)
+async def debug_waiting_location(message: Message, state: FSMContext):
+    """Отладочный обработчик для всех сообщений в waiting_location"""
+    user_id = message.from_user.id
+    current_state = await state.get_state()
+    
+    print(f"DEBUG: Пользователь {user_id} отправил необработанное сообщение в состоянии {current_state}")
+    print(f"DEBUG: Тип сообщения: {message.content_type}")
+    if message.text:
+        print(f"DEBUG: Текст сообщения: '{message.text}'")
+    if message.location:
+        print(f"DEBUG: Координаты: lat={message.location.latitude}, lon={message.location.longitude}")
+    
+    # Отвечаем пользователю, что мы получили сообщение, но не знаем что с ним делать
+    await message.answer("🤔 Получил ваше сообщение, но что-то пошло не так. Попробуйте снова.")

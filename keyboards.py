@@ -122,6 +122,7 @@ def get_product_card_keyboard(product_id, in_cart=False, from_category=None):
         keyboard = [
             [
                 InlineKeyboardButton(text="➖", callback_data=f"cart_decrease_{product_id}"),
+                InlineKeyboardButton(text="🔢 Ввести кол-во", callback_data=f"set_quantity_{product_id}"),
                 InlineKeyboardButton(text="➕", callback_data=f"cart_increase_{product_id}")
             ],
             [InlineKeyboardButton(text=_("product.remove_from_cart"), callback_data=f"cart_remove_{product_id}")],
@@ -140,6 +141,13 @@ def get_product_card_keyboard(product_id, in_cart=False, from_category=None):
             ],
             [InlineKeyboardButton(text=_("common.to_catalog"), callback_data="catalog")]
         ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+# Клавиатура для отмены ввода количества
+def get_quantity_input_cancel_keyboard():
+    keyboard = [
+        [InlineKeyboardButton(text=_("common.cancel"), callback_data="cancel_quantity_input")]
+    ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # Корзина
@@ -162,20 +170,24 @@ def get_cart_keyboard(cart_items):
     keyboard.append([InlineKeyboardButton(text=_("common.main_menu"), callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-# Выбор зоны доставки
-def get_delivery_zones_keyboard():
-    from config import DELIVERY_ZONES
-    keyboard = []
-    
-    for zone_id, zone_info in DELIVERY_ZONES.items():
-        keyboard.append([
-            InlineKeyboardButton(
-                text=f"{zone_info['name']} - {zone_info['price']}₾ ({zone_info['time']})",
-                callback_data=f"delivery_{zone_id}"
-            )
-        ])
-    
-    keyboard.append([InlineKeyboardButton(text=_("common.back"), callback_data="cart")])
+# Запрос геолокации для доставки
+def get_location_request_keyboard(user_id=None):
+    """Клавиатура для запроса геолокации"""
+    keyboard = [
+        # Кнопка для отправки геолокации (reply keyboard)
+        [KeyboardButton(text=_("checkout.share_location", user_id=user_id), request_location=True)],
+        [KeyboardButton(text=_("checkout.manual_address", user_id=user_id))],
+        [KeyboardButton(text="🗺️ Отправить точку на карте")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True, one_time_keyboard=True)
+
+# Inline клавиатура для геолокации
+def get_location_inline_keyboard(user_id=None):
+    """Inline клавиатура для геолокации"""
+    keyboard = [
+        [InlineKeyboardButton(text=_("checkout.manual_address", user_id=user_id), callback_data="manual_address")],
+        [InlineKeyboardButton(text=_("common.back", user_id=user_id), callback_data="cart")]
+    ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # Подтверждение заказа
