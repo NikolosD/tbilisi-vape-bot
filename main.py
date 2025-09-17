@@ -2,6 +2,16 @@ import asyncio
 import logging
 import signal
 import sys
+import subprocess
+import os
+
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    logging.warning("⚠️ psutil не установлен. Автоматическое завершение других экземпляров недоступно.")
+
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
@@ -13,7 +23,7 @@ from config import BOT_TOKEN, ADMIN_IDS
 from database import db, init_db
 from keyboards import get_main_menu
 from handlers.user import router as user_router
-from handlers.admin import router as admin_router
+from handlers.admin import admin_router
 from admin_management import router as admin_management_router
 from i18n import _
 from middleware import AntiSpamMiddleware
@@ -157,6 +167,73 @@ async def cmd_help(message: Message):
 
     await message.answer(help_text, parse_mode='HTML')
 
+def kill_other_bot_instances():
+    """Завершить другие экземпляры бота"""
+    if not PSUTIL_AVAILABLE:
+        logger.warning("⚠️ psutil недоступен. Используем альтернативный метод...")
+        try:
+            # Альтернативный метод через системные команды
+            if sys.platform == "darwin" or sys.platform.startswith("linux"):
+                result = subprocess.run(
+                    ["pgrep", "-f", "python.*main.py"], 
+                    capture_output=True, 
+                    text=True
+                )
+                if result.stdout:
+                    pids = result.stdout.strip().split('\n')
+                    current_pid = str(os.getpid())
+                    for pid in pids:
+                        if pid and pid != current_pid:
+                            logger.info(f"🔪 Завершаем процесс {pid}")
+                            subprocess.run(["kill", "-TERM", pid], capture_output=True)
+                    import time
+                    time.sleep(2)
+                    logger.info("✅ Завершение других процессов выполнено")
+                else:
+                    logger.info("✅ Других экземпляров не найдено")
+            else:
+                logger.info("💡 Для автоматического завершения установите: pip install psutil")
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось завершить другие экземпляры: {e}")
+            logger.info("💡 Для лучшей поддержки установите: pip install psutil")
+        return
+    
+    current_pid = os.getpid()
+    killed_count = 0
+    
+    try:
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                # Проверяем процессы Python
+                if proc.info['name'] and 'python' in proc.info['name'].lower():
+                    cmdline = proc.info['cmdline']
+                    if cmdline and len(cmdline) > 1:
+                        # Ищем процессы, запускающие main.py этого бота
+                        if 'main.py' in ' '.join(cmdline) and proc.info['pid'] != current_pid:
+                            logger.info(f"🔪 Завершаем старый экземпляр бота (PID: {proc.info['pid']})")
+                            proc.terminate()
+                            killed_count += 1
+                            
+                            # Ждем 2 секунды и принудительно убиваем если нужно
+                            try:
+                                proc.wait(timeout=2)
+                            except psutil.TimeoutExpired:
+                                proc.kill()
+                                logger.info(f"💀 Принудительно завершен процесс {proc.info['pid']}")
+                                
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+    except Exception as e:
+        logger.warning(f"⚠️ Ошибка при завершении процессов: {e}")
+    
+    if killed_count > 0:
+        logger.info(f"✅ Завершено {killed_count} старых экземпляров бота")
+        # Небольшая пауза для освобождения ресурсов
+        import time
+        time.sleep(3)
+    else:
+        logger.info("✅ Других экземпляров бота не найдено")
+
 async def health_check(request):
     """Health check endpoint для Render"""
     return web.Response(text="Bot is running!")
@@ -182,6 +259,10 @@ async def main():
     
     try:
         logger.info("🔥 Запуск Tbilisi VAPE Shop Bot...")
+        
+        # Завершаем другие экземпляры бота
+        logger.info("🔍 Поиск и завершение других экземпляров бота...")
+        kill_other_bot_instances()
         logger.info("Инициализация базы данных...")
         await init_db()
         
