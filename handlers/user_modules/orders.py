@@ -1,0 +1,674 @@
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery, Contact, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+import logging
+import json
+
+from database import db
+from config import DELIVERY_ZONES, MIN_ORDER_AMOUNT, PAYMENT_INFO, ADMIN_IDS
+from models import OrderStatus
+from message_manager import message_manager
+from keyboards import (
+    get_location_request_keyboard, get_order_confirmation_keyboard,
+    get_order_details_keyboard, get_payment_notification_keyboard
+)
+from i18n import _
+from button_filters import is_orders_button
+from pages.manager import page_manager
+
+logger = logging.getLogger(__name__)
+
+router = Router()
+
+class OrderStates(StatesGroup):
+    waiting_contact = State()
+    waiting_location = State()
+    waiting_address = State()
+    waiting_payment_screenshot = State()
+
+# Обработчик текстовых сообщений из главного меню
+@router.message(is_orders_button)
+async def show_orders(message: Message):
+    """Показать заказы пользователя"""
+    await page_manager.orders.show_from_message(message)
+
+@router.callback_query(F.data == "my_orders")
+async def show_my_orders(callback: CallbackQuery):
+    """Показать заказы пользователя"""
+    await page_manager.orders.show_from_callback(callback)
+
+@router.callback_query(F.data.startswith("orders_page_"))
+async def orders_pagination(callback: CallbackQuery):
+    """Обработчик пагинации заказов"""
+    page = int(callback.data.split("_")[2])
+    await page_manager.orders.show_from_callback(callback, page=page)
+
+@router.callback_query(F.data == "checkout")
+async def start_checkout(callback: CallbackQuery, state: FSMContext):
+    """Начать оформление заказа"""
+    user_id = callback.from_user.id
+    cart_items = await db.get_cart(user_id)
+    
+    if not cart_items:
+        await callback.answer(_("cart.empty"), show_alert=True)
+        return
+    
+    total = sum(item[1] * item[3] for item in cart_items)
+    
+    if total < MIN_ORDER_AMOUNT:
+        await callback.answer(
+            _("error.min_order_amount", user_id=callback.from_user.id, amount=MIN_ORDER_AMOUNT),
+            show_alert=True
+        )
+        return
+    
+    # Удаляем inline сообщение и отправляем новое с Reply клавиатурой
+    await callback.message.delete()
+    
+    print(f"DEBUG: Пользователь {user_id} начал checkout, отправляем Reply клавиатуру")
+    
+    location_request_msg = await callback.message.answer(
+        _("checkout.location_request", user_id=user_id).format(total=total),
+        reply_markup=get_location_request_keyboard(user_id=user_id),
+        parse_mode='HTML'
+    )
+    
+    await state.set_state(OrderStates.waiting_location)
+    await state.update_data(total=total, location_request_msg_id=location_request_msg.message_id)
+    
+    print(f"DEBUG: Состояние установлено на waiting_location для пользователя {user_id}")
+
+# Обработчик геолокации (ДОЛЖЕН БЫТЬ ВЫШЕ ТЕКСТОВОГО!)
+@router.message(OrderStates.waiting_location, F.location)
+async def process_location(message: Message, state: FSMContext):
+    """Обработка полученной геолокации"""
+    user_id = message.from_user.id
+    location = message.location
+    
+    current_state = await state.get_state()
+    print(f"DEBUG: Получена геолокация от пользователя {user_id}: lat={location.latitude}, lon={location.longitude}")
+    print(f"DEBUG: Текущее состояние пользователя {user_id}: {current_state}")
+    
+    # Сохраняем координаты
+    await state.update_data(
+        latitude=location.latitude,
+        longitude=location.longitude
+    )
+    
+    location_msg = await message.answer(
+        _("checkout.location_received", user_id=user_id).format(
+            lat=location.latitude,
+            lon=location.longitude
+        ),
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode='HTML'
+    )
+    
+    # Переходим к вводу точного адреса
+    address_msg = await message.answer(
+        _("checkout.enter_exact_address", user_id=user_id),
+        parse_mode='HTML'
+    )
+    
+    # Сохраняем ID сообщений для последующего удаления
+    await state.update_data(
+        location_msg_id=location_msg.message_id,
+        address_msg_id=address_msg.message_id,
+        location_map_msg_id=message.message_id  # ID сообщения с картой геолокации
+    )
+    
+    await state.set_state(OrderStates.waiting_address)
+
+# Обработчик для текстовой кнопки "Ввести адрес вручную" из Reply клавиатуры
+@router.message(OrderStates.waiting_location, F.text)
+async def handle_manual_address_text(message: Message, state: FSMContext):
+    """Обработка нажатия кнопки 'Ввести адрес вручную' в Reply клавиатуре"""
+    user_id = message.from_user.id
+    
+    print(f"DEBUG: Получен текст от пользователя {user_id}: '{message.text}'")
+    
+    # Проверяем, что это именно кнопка "Ввести адрес вручную"
+    if message.text == _("checkout.manual_address", user_id=user_id):
+        # Убираем Reply клавиатуру и отправляем сообщение с запросом адреса
+        await message.answer(
+            _("checkout.enter_address", user_id=user_id),
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode='HTML'
+        )
+        
+        address_msg = await message.answer(
+            "👆 Введите адрес в следующем сообщении:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=_("common.back", user_id=user_id), callback_data="cart")]
+            ])
+        )
+        
+        # Получаем существующие данные и сохраняем ID сообщения для последующего удаления
+        data = await state.get_data()
+        await state.update_data(address_msg_id=address_msg.message_id)
+        
+        await state.set_state(OrderStates.waiting_address)
+    elif message.text == "🗺️ Отправить точку на карте":
+        # Инструкция по отправке геолокации вручную
+        await message.answer(
+            "📍 <b>Отправьте свою геопозицию:</b>\n\n"
+            "1️⃣ Нажмите на скрепку 📎\n"
+            "2️⃣ Выберите «Геопозиция» 🌍\n"
+            "3️⃣ Отправьте вашу текущую позицию или выберите точку на карте\n\n"
+            "<i>Или используйте кнопки ниже:</i>",
+            reply_markup=get_location_request_keyboard(user_id=user_id),
+            parse_mode='HTML'
+        )
+    else:
+        # Если это не кнопка, а произвольный текст, возможно это адрес
+        await message.answer(
+            "📍 Пожалуйста, используйте кнопки ниже или отправьте геолокацию:",
+            reply_markup=get_location_request_keyboard(user_id=user_id)
+        )
+
+# Обработчик для старой inline кнопки (оставим для совместимости)
+@router.callback_query(F.data == "manual_address")
+async def manual_address(callback: CallbackQuery, state: FSMContext):
+    """Ввод адреса вручную (inline кнопка)"""
+    user_id = callback.from_user.id
+    
+    await callback.message.edit_text(
+        _("checkout.enter_address", user_id=user_id),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=_("common.back", user_id=user_id), callback_data="cart")]
+        ]),
+        parse_mode='HTML'
+    )
+    
+    await state.set_state(OrderStates.waiting_address)
+
+@router.message(OrderStates.waiting_contact, F.content_type == 'contact')
+async def process_contact(message: Message, state: FSMContext):
+    """Обработка контакта"""
+    contact = message.contact
+    user_id = message.from_user.id
+    
+    # Сохраняем номер телефона
+    await db.update_user_contact(user_id, contact.phone_number, "")
+    
+    data = await state.get_data()
+    zone_id = data['delivery_zone']
+    zone_info = DELIVERY_ZONES[zone_id]
+    
+    is_admin = user_id in ADMIN_IDS
+    await message.answer(
+        f"📍 <b>Укажите адрес доставки</b>\n\n"
+        f"🚚 Зона: {zone_info['name']}\n"
+        f"💰 Стоимость доставки: {zone_info['price']}₾\n"
+        f"⏱ Время доставки: {zone_info['time']}\n\n"
+        f"Напишите точный адрес доставки:",
+        reply_markup=get_main_menu(is_admin=is_admin),
+        parse_mode='HTML'
+    )
+    await state.set_state(OrderStates.waiting_address)
+
+@router.message(OrderStates.waiting_address)
+async def process_address(message: Message, state: FSMContext):
+    """Обработка адреса"""
+    address = message.text
+    user_id = message.from_user.id
+    
+    # Отладочная информация
+    logger.info(f"Получен адрес: {address} от пользователя {user_id}")
+    
+    # Получаем данные из состояния
+    data = await state.get_data()
+    logger.info(f"Данные состояния: {data}")
+    
+    # Удаляем предыдущие сообщения с геолокацией и запросом адреса
+    location_msg_id = data.get('location_msg_id')
+    address_msg_id = data.get('address_msg_id')
+    location_map_msg_id = data.get('location_map_msg_id')
+    location_request_msg_id = data.get('location_request_msg_id')
+    
+    if location_msg_id:
+        try:
+            await message.bot.delete_message(chat_id=user_id, message_id=location_msg_id)
+        except Exception:
+            pass  # Сообщение могло быть уже удалено
+    
+    if address_msg_id:
+        try:
+            await message.bot.delete_message(chat_id=user_id, message_id=address_msg_id)
+        except Exception:
+            pass  # Сообщение могло быть уже удалено
+    
+    if location_map_msg_id:
+        try:
+            await message.bot.delete_message(chat_id=user_id, message_id=location_map_msg_id)
+        except Exception:
+            pass  # Сообщение с картой могло быть уже удалено
+    
+    if location_request_msg_id:
+        try:
+            await message.bot.delete_message(chat_id=user_id, message_id=location_request_msg_id)
+        except Exception:
+            pass  # Сообщение с запросом могло быть уже удалено
+    
+    # Удаляем сообщение пользователя с адресом
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    
+    # Проверяем есть ли общая сумма
+    if 'total' not in data:
+        await message.answer(_("common.error"))
+        await state.clear()
+        return
+    
+    # Координаты (если были отправлены)
+    latitude = data.get('latitude')
+    longitude = data.get('longitude')
+    
+    # Стандартная стоимость доставки (можно настроить в зависимости от расстояния)
+    delivery_price = 10  # 10₾ по умолчанию
+    
+    # Получаем корзину и пользователя
+    cart_items = await db.get_cart(user_id)
+    user = await db.get_user(user_id)
+    logger.info(f"Корзина пользователя: {cart_items}")
+    logger.info(f"Данные пользователя: {user}")
+    
+    if not cart_items:
+        logger.warning(f"Корзина пуста для пользователя {user_id}")
+        await message.answer(_("cart.empty"))
+        await state.clear()
+        return
+    
+    if not user:
+        logger.warning(f"Пользователь {user_id} не найден в базе данных, создаем...")
+        # Создаем пользователя автоматически
+        await db.add_user(
+            user_id, 
+            message.from_user.username, 
+            message.from_user.first_name
+        )
+        user = await db.get_user(user_id)
+        if not user:
+            logger.error(f"Не удалось создать пользователя {user_id}")
+            await message.answer("❌ Ошибка: не удалось создать пользователя. Попробуйте /start")
+            await state.clear()
+            return
+        
+    phone = user.phone
+    
+    # Вычисляем стоимость
+    items_total = sum(float(item.quantity * item.price) for item in cart_items)
+    total_price = items_total + delivery_price
+    
+    logger.info(f"Стоимость заказа: товары={items_total}, доставка={delivery_price}, итого={total_price}")
+    
+    # Подготавливаем данные заказа
+    products_data = []
+    for item in cart_items:
+        products_data.append({
+            'id': item.product_id,
+            'name': item.name,
+            'price': float(item.price),
+            'quantity': item.quantity
+        })
+    
+    logger.info(f"Данные товаров для заказа: {products_data}")
+    
+    # Создаем заказ
+    try:
+        order_id = await db.create_order(
+            user_id=user_id,
+            products=products_data,
+            total_price=total_price,
+            delivery_zone="custom",  # Заменяем на кастомную зону
+            delivery_price=delivery_price,
+            phone=phone,
+            address=address,
+            latitude=latitude,
+            longitude=longitude
+        )
+        logger.info(f"Заказ создан с номером: {order_id}")
+    except Exception as e:
+        logger.error(f"Ошибка создания заказа: {e}", exc_info=True)
+        await message.answer("❌ Ошибка при создании заказа. Попробуйте еще раз.")
+        await state.clear()
+        return
+    
+    # Очищаем корзину
+    await db.clear_cart(user_id)
+    
+    # Формируем детали заказа
+    order_text = f"""✅ <b>Заказ #{order_id} создан!</b>
+
+📦 <b>Товары:</b>
+"""
+    
+    for item in products_data:
+        order_text += f"• {item['name']} × {item['quantity']} = {item['price'] * item['quantity']}₾\n"
+    
+    # Формируем информацию о доставке
+    delivery_info = "По координатам"
+    if latitude and longitude:
+        delivery_info = f"По координатам ({latitude:.6f}, {longitude:.6f})"
+    
+    order_text += f"""
+
+🚚 <b>Доставка:</b> {delivery_info} - {delivery_price}₾
+📍 <b>Адрес:</b> {address}
+📱 <b>Телефон:</b> {phone}
+
+💰 <b>К оплате: {total_price}₾</b>
+
+💳 <b>Реквизиты для оплаты:</b>
+🏦 Банк: {PAYMENT_INFO['bank_name']}
+💳 Карта: {PAYMENT_INFO['card']}
+📱 СБП: {PAYMENT_INFO['sbp_phone']}
+
+После оплаты нажмите кнопку "Оплатил(а)" и пришлите скриншот."""
+    
+    # Удаляем сообщение пользователя с адресом
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    
+    # Удаляем предыдущее сообщение с запросом адреса
+    try:
+        await message_manager.delete_user_message(message.bot, user_id)
+    except Exception:
+        pass
+    
+    # Используем менеджер сообщений для замены предыдущего сообщения
+    await message_manager.send_or_edit_message(
+        message.bot, user_id,
+        order_text,
+        reply_markup=get_order_confirmation_keyboard(order_id, user_id=user_id),
+        menu_state='order_created',
+        force_new=True
+    )
+    
+    # Уведомление админу будет отправлено только после загрузки скриншота оплаты
+    
+    await state.clear()
+
+@router.callback_query(F.data.startswith("payment_done_"))
+async def payment_done(callback: CallbackQuery, state: FSMContext):
+    """Пользователь сообщает об оплате"""
+    order_id = int(callback.data.split("_")[2])
+    
+    await state.update_data(order_id=order_id)
+    
+    await callback.message.edit_text(
+        f"📸 <b>Заказ #{order_id}</b>\n\n"
+        f"Пришлите скриншот оплаты для подтверждения заказа:",
+        parse_mode='HTML'
+    )
+    
+    # Сохраняем ID сообщения с запросом скриншота в менеджере
+    user_id = callback.from_user.id
+    message_manager.set_user_message(user_id, callback.message.message_id, 'waiting_screenshot')
+    
+    await state.set_state(OrderStates.waiting_payment_screenshot)
+
+@router.message(OrderStates.waiting_payment_screenshot, F.content_type == 'photo')
+async def process_payment_screenshot(message: Message, state: FSMContext):
+    """Обработка скриншота оплаты"""
+    data = await state.get_data()
+    order_id = data['order_id']
+    
+    # Сохраняем file_id скриншота
+    photo_file_id = message.photo[-1].file_id
+    await db.update_order_screenshot_by_number(order_id, photo_file_id)
+    await db.update_order_status_by_number(order_id, 'payment_check')
+    
+    # Удаляем сообщение пользователя со скриншотом
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    
+    # Удаляем предыдущее сообщение с запросом скриншота
+    user_id = message.from_user.id
+    try:
+        await message_manager.delete_user_message(message.bot, user_id)
+    except Exception:
+        pass
+    
+    # Используем менеджер сообщений для отправки подтверждения
+    await message_manager.send_or_edit_message(
+        message.bot, user_id,
+        f"✅ <b>Скриншот получен!</b>\n\n"
+        f"Заказ #{order_id} отправлен на проверку.\n"
+        f"Мы свяжемся с вами в течение 15 минут.\n\n"
+        f"Статус заказа можно посмотреть в разделе 'Мои заказы'",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_menu")]
+        ]),
+        menu_state='screenshot_confirmed',
+        force_new=True
+    )
+    
+    # Уведомляем админов с подробной информацией
+    from config import ADMIN_IDS, DELIVERY_ZONES
+    
+    logger.info(f"Загружены ADMIN_IDS из config: {ADMIN_IDS}")
+    logger.info(f"Тип ADMIN_IDS: {type(ADMIN_IDS)}")
+    
+    logger.info(f"Получаем данные заказа {order_id} для уведомления админов")
+    order = await db.get_order_by_number(order_id)
+    
+    if not order:
+        logger.error(f"Заказ {order_id} не найден в базе данных!")
+        return
+    
+    logger.info(f"Заказ {order_id} найден, формируем уведомление для админов")
+    logger.info(f"Структура заказа: {order}")
+    
+    # Парсим продукты  
+    products = order.products_data
+    
+    # Получаем информацию о пользователе
+    user = await db.get_user(message.from_user.id)
+    
+    # Получаем координаты из заказа (безопасно)
+    latitude = getattr(order, 'latitude', None)
+    longitude = getattr(order, 'longitude', None)
+    
+    # Формируем красивое уведомление с переводами
+    admin_lang = 'ru'  # Язык администратора
+    
+    admin_text = f"""{_("admin_notifications.new_order", user_id=617646449).format(order_number=order.order_number)}
+
+{_("admin_notifications.user", user_id=617646449)} {message.from_user.first_name or _("admin_notifications.unknown", user_id=617646449)} (@{message.from_user.username or _("admin_notifications.no_username", user_id=617646449)})
+{_("admin_notifications.amount", user_id=617646449)} {order.total_price}₾
+{_("admin_notifications.address", user_id=617646449)} {order.address}
+"""
+
+    # Добавляем координаты если есть
+    if latitude and longitude:
+        admin_text += f"{_('admin_notifications.coordinates', user_id=617646449)} {latitude:.6f}, {longitude:.6f}\n"
+    
+    admin_text += f"\n{_('admin_notifications.order_content', user_id=617646449)}\n"
+    
+    for product in products:
+        admin_text += f"• {product['name']} × {product['quantity']} = {product['price'] * product['quantity']}₾\n"
+    
+    # Информация о доставке с учетом геолокации
+    if order.delivery_zone == "custom":
+        delivery_info = _("admin_notifications.by_coordinates", user_id=617646449)
+        if latitude and longitude:
+            delivery_info = f"{_('admin_notifications.by_coordinates', user_id=617646449)} ({latitude:.6f}, {longitude:.6f})"
+    else:
+        zone_info = DELIVERY_ZONES.get(order.delivery_zone, {'name': _("admin_notifications.unknown", user_id=617646449)})
+        delivery_info = zone_info['name']
+    
+    admin_text += f"""
+{_("admin_notifications.delivery", user_id=617646449)} {delivery_info} - {order.delivery_price}₾
+{_("admin_notifications.phone", user_id=617646449)} {order.phone}
+{_("admin_notifications.order_date", user_id=617646449)} {str(order.created_at)[:16]}
+
+{_("admin_notifications.payment_screenshot", user_id=617646449)}
+{_("admin_notifications.awaiting_verification", user_id=617646449)}"""
+    
+    logger.info(f"Отправляем уведомления админам. ADMIN_IDS: {ADMIN_IDS}")
+    logger.info(f"Количество админов: {len(ADMIN_IDS)}")
+    
+    if not ADMIN_IDS:
+        logger.error("ADMIN_IDS пуст! Проверьте переменную окружения ADMIN_IDS")
+        return
+    
+    for admin_id in ADMIN_IDS:
+        try:
+            logger.info(f"Попытка отправить уведомление админу {admin_id}")
+            await message.bot.send_photo(
+                admin_id,
+                photo=photo_file_id,
+                caption=admin_text,
+                reply_markup=get_payment_notification_keyboard(order.id),
+                parse_mode='HTML'
+            )
+            logger.info(f"✅ Уведомление успешно отправлено админу {admin_id}")
+        except Exception as e:
+            logger.error(f"❌ Не удалось отправить уведомление админу {admin_id}: {e}")
+            logger.error(f"Тип ошибки: {type(e).__name__}")
+            import traceback
+            logger.error(f"Полная ошибка: {traceback.format_exc()}")
+    
+    await state.clear()
+
+@router.callback_query(F.data.startswith("cancel_order_"))
+async def cancel_order(callback: CallbackQuery):
+    """Отменить заказ пользователем"""
+    order_number = int(callback.data.split("_")[2])  # Это номер заказа, не ID
+    user_id = callback.from_user.id
+    
+    # Проверяем, что заказ принадлежит пользователю
+    order = await db.get_order_by_number(order_number)
+    if not order or order.user_id != user_id:
+        await callback.answer("❌ Заказ не найден", show_alert=True)
+        return
+    
+    # Проверяем, что заказ можно отменить (только ожидающие оплату)
+    if order.status not in [OrderStatus.WAITING_PAYMENT.value, OrderStatus.PAYMENT_CHECK.value]:
+        await callback.answer("❌ Заказ нельзя отменить", show_alert=True)
+        return
+    
+    # Возвращаем товары на склад
+    products = json.loads(order.products)
+    for product in products:
+        await db.increase_product_quantity(product['id'], product['quantity'])
+    
+    # Отменяем заказ
+    await db.update_order_status(order.id, 'cancelled')
+    
+    await callback.answer("✅ Заказ отменен", show_alert=True)
+    
+    # Обновляем сообщение
+    await message_manager.handle_callback_navigation(
+        callback,
+        "❌ <b>Заказ отменен</b>\n\n"
+        f"Заказ #{order.order_number} был отменен.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_menu")]
+        ]),
+        menu_state='order_cancelled'
+    )
+
+@router.callback_query(F.data.startswith("order_"))
+async def show_order_details(callback: CallbackQuery):
+    """Показать детали заказа"""
+    order_id = int(callback.data.split("_")[1])
+    order = await db.get_order(order_id)
+    
+    if not order:
+        await callback.answer("❌ Заказ не найден", show_alert=True)
+        return
+    
+    # Используем свойство модели для получения продуктов
+    products = order.products_data
+    
+    status_text = {
+        'waiting_payment': '⏳ Ожидает оплаты',
+        'payment_check': '💰 Проверка оплаты',
+        'paid': '✅ Оплачен, готовится к отправке',
+        'shipping': '🚚 Отправлен',
+        'delivered': '✅ Доставлен',
+        'cancelled': '❌ Отменен'
+    }
+    
+    order_text = f"""📋 <b>Заказ #{order.order_number}</b>
+
+📦 <b>Товары:</b>
+"""
+    
+    for product in products:
+        order_text += f"• {product['name']} × {product['quantity']} = {product['price'] * product['quantity']}₾\n"
+    
+    zone_info = DELIVERY_ZONES.get(order.delivery_zone, {'name': 'Неизвестно'})
+    
+    order_text += f"""
+
+🚚 <b>Доставка:</b> {zone_info['name']} - {order.delivery_price}₾
+📍 <b>Адрес:</b> {order.address}
+📱 <b>Телефон:</b> {order.phone}
+📅 <b>Дата:</b> {str(order.created_at)[:16]}
+
+💰 <b>Итого: {order.total_price}₾</b>
+
+📊 <b>Статус:</b> {status_text.get(order.status, order.status)}"""
+    
+    await callback.message.edit_text(
+        order_text,
+        reply_markup=get_order_details_keyboard(order_id, order.status),
+        parse_mode='HTML'
+    )
+
+@router.callback_query(F.data.startswith("resend_screenshot_"))
+async def resend_screenshot(callback: CallbackQuery, state: FSMContext):
+    """Повторная отправка скриншота оплаты"""
+    order_number = int(callback.data.split("_")[2])
+    user_id = callback.from_user.id
+    
+    # Получаем заказ
+    order = await db.get_order_by_number(order_number)
+    if not order or order.user_id != user_id:
+        await callback.answer(_("error.order_not_found", user_id=user_id), show_alert=True)
+        return
+    
+    # Сохраняем номер заказа в состоянии
+    await state.update_data(order_id=order_number)
+    await state.set_state(OrderStates.waiting_payment_screenshot)
+    
+    # Отправляем инструкции для повторной отправки скриншота
+    await callback.message.edit_text(
+        f"📸 <b>Повторная отправка скриншота</b>\n\n"
+        f"📋 Заказ #{order_number}\n"
+        f"💰 К оплате: {order.total_price}₾\n\n"
+        f"Пожалуйста, отправьте корректный скриншот оплаты.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=_("common.cancel", user_id=user_id), callback_data="my_orders")]
+        ]),
+        parse_mode='HTML'
+    )
+    
+    await callback.answer()
+
+# Общий отладочный обработчик для всех сообщений в состоянии waiting_location (ДОЛЖЕН БЫТЬ ПОСЛЕДНИМ!)
+@router.message(OrderStates.waiting_location)
+async def debug_waiting_location(message: Message, state: FSMContext):
+    """Отладочный обработчик для всех сообщений в waiting_location"""
+    user_id = message.from_user.id
+    current_state = await state.get_state()
+    
+    print(f"DEBUG: Пользователь {user_id} отправил необработанное сообщение в состоянии {current_state}")
+    print(f"DEBUG: Тип сообщения: {message.content_type}")
+    if message.text:
+        print(f"DEBUG: Текст сообщения: '{message.text}'")
+    if message.location:
+        print(f"DEBUG: Координаты: lat={message.location.latitude}, lon={message.location.longitude}")
+    
+    # Отвечаем пользователю, что мы получили сообщение, но не знаем что с ним делать
+    await message.answer("🤔 Получил ваше сообщение, но что-то пошло не так. Попробуйте снова.")
