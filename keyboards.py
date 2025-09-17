@@ -250,6 +250,14 @@ def get_contact_keyboard():
     )
     return keyboard
 
+def get_contact_keyboard_with_message(user_id=None):
+    """Клавиатура для страницы контактов с кнопкой написать админу"""
+    buttons = [
+        [InlineKeyboardButton(text=_("contact.message_admin", user_id=user_id), callback_data="message_admin")],
+        [InlineKeyboardButton(text=_("common.main_menu", user_id=user_id), callback_data="main_menu")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 # Админ панель
 def get_admin_keyboard(user_id=None):
     from config import SUPER_ADMIN_ID
@@ -258,7 +266,8 @@ def get_admin_keyboard(user_id=None):
         [InlineKeyboardButton(text=_("admin.products"), callback_data="admin_products")],
         [InlineKeyboardButton(text=_("admin.all_orders"), callback_data="admin_all_orders")],
         [InlineKeyboardButton(text=_("admin.stats"), callback_data="admin_stats")],
-        [InlineKeyboardButton(text=_("admin.broadcast"), callback_data="admin_broadcast")]
+        [InlineKeyboardButton(text=_("admin.broadcast"), callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text=_("admin.message_client"), callback_data="admin_message_client")]
     ]
     
     # Добавляем кнопку управления админами только для супер-админа
@@ -382,6 +391,9 @@ def get_admin_order_actions_keyboard(order_id, status, from_all_orders=False):
     if status in ['delivered', 'cancelled']:
         keyboard.append([InlineKeyboardButton(text=_("admin_actions.change_status"), callback_data=f"admin_change_status_{order_id}")])
     
+    # Кнопка написать клиенту (доступна всегда)
+    keyboard.append([InlineKeyboardButton(text=_("admin_actions.message_client"), callback_data=f"admin_message_client_{order_id}")])
+    
     # Кнопка возврата
     keyboard.append([InlineKeyboardButton(text=_("common.to_admin"), callback_data="admin_panel")])
     
@@ -466,7 +478,8 @@ def get_enhanced_admin_keyboard(user_id=None):
         [InlineKeyboardButton(text=_("admin.all_orders", user_id=user_id), callback_data="admin_all_orders")],
         [InlineKeyboardButton(text=_("admin.products", user_id=user_id), callback_data="admin_products")],
         [InlineKeyboardButton(text=_("admin.stats", user_id=user_id), callback_data="admin_stats")],
-        [InlineKeyboardButton(text=_("admin.broadcast", user_id=user_id), callback_data="admin_broadcast")]
+        [InlineKeyboardButton(text=_("admin.broadcast", user_id=user_id), callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text=_("admin.message_client", user_id=user_id), callback_data="admin_message_client")]
     ]
     
     # Добавляем кнопку управления админами только для супер-админа

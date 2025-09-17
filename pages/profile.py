@@ -69,8 +69,8 @@ class ProfilePage(BasePage):
         text = f"{_('contact.title', user_id=user_id)}\n\n"
         text += _('contact.description', user_id=user_id)
         
-        from keyboards import get_back_to_menu_keyboard
+        from keyboards import get_contact_keyboard_with_message
         return {
             'text': text,
-            'keyboard': get_back_to_menu_keyboard(user_id=user_id)
+            'keyboard': get_contact_keyboard_with_message(user_id=user_id)
         }

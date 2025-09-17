@@ -32,6 +32,9 @@ class AdminStates(StatesGroup):
     waiting_category_emoji = State()
     waiting_category_description = State()
     waiting_admin_id = State()
+    waiting_client_message = State()
+    waiting_client_id = State()
+    waiting_general_client_message = State()
 
 # Фильтр для админов (синхронная версия для совместимости)
 def admin_filter(message_or_callback):
@@ -47,8 +50,10 @@ async def is_admin(user_id: int) -> bool:
 
 # Админ панель
 @router.callback_query(F.data == "admin_panel", admin_filter)
-async def show_admin_panel(callback: CallbackQuery):
+async def show_admin_panel(callback: CallbackQuery, state: FSMContext):
     """Показать улучшенную админ панель"""
+    # Очищаем состояние при возврате в админ панель
+    await state.clear()
     # Получаем статистику по разным типам заказов
     new_orders = await db.get_new_orders()
     checking_orders = await db.get_checking_orders()
@@ -555,17 +560,193 @@ async def admin_all_orders_page(callback: CallbackQuery, page: int):
             parse_mode='HTML'
         )
 
+# Обработчик сообщений для клиентов (должен быть ПЕРЕД общим обработчиком)
+@router.message(AdminStates.waiting_client_message)
+async def process_client_message_early(message: Message, state: FSMContext):
+    """Обработать и отправить сообщение клиенту"""
+    print("DEBUG: process_client_message_early called!")  # Временное логирование
+    data = await state.get_data()
+    client_id = data.get('client_id')
+    order_number = data.get('order_number')
+    order_id = data.get('order_id')
+    
+    if not client_id:
+        admin_language = 'ru'  # Язык администратора
+        await message.answer(_("error.client_id_not_found", admin_language))
+        await state.clear()
+        return
+    
+    # Форматируем сообщение для клиента на его языке
+    client_message = (
+        f"{_('admin_message.header', user_id=client_id)}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{_('admin_message.order_prefix', user_id=client_id)}{order_number}\n\n"
+        f"{message.text}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<i>{_('admin_message.footer', user_id=client_id)}</i>"
+    )
+    
+    try:
+        # Отправляем сообщение клиенту
+        await message.bot.send_message(
+            client_id,
+            client_message,
+            parse_mode='HTML'
+        )
+        
+        # Подтверждение админу
+        admin_language = 'ru'  # Язык администратора
+        await message.answer(
+            _("admin.message_sent_success", admin_language).format(
+                client_id=client_id,
+                order_number=order_number
+            ),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=_("common.to_orders", admin_language), callback_data=f"admin_order_{order_id}")],
+                [InlineKeyboardButton(text=_("common.to_admin", admin_language), callback_data="admin_panel")]
+            ]),
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        admin_language = 'ru'  # Язык администратора
+        await message.answer(
+            _("admin.message_send_error", admin_language).format(error=str(e)),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=_("common.to_orders", admin_language), callback_data=f"admin_order_{order_id}")],
+                [InlineKeyboardButton(text=_("common.to_admin", admin_language), callback_data="admin_panel")]
+            ]),
+            parse_mode='HTML'
+        )
+    
+    await state.clear()
+
+# Специфичные обработчики состояний - ДОЛЖНЫ БЫТЬ ВЫШЕ ОБЩЕГО ОБРАБОТЧИКА
+@router.message(AdminStates.waiting_client_id)
+async def process_client_id_input(message: Message, state: FSMContext):
+    """Обработать ввод ID клиента"""
+    admin_language = 'ru'  # Язык администратора
+    
+    try:
+        client_id = int(message.text.strip())
+        
+        # Проверяем, существует ли пользователь в базе
+        user = await db.get_user(client_id)
+        if not user:
+            await message.answer(
+                _("admin.client_not_found", admin_language).format(client_id=client_id),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text=_("common.to_admin", admin_language), callback_data="admin_panel")]
+                ]),
+                parse_mode='HTML'
+            )
+            await state.clear()
+            return
+        
+        # Сохраняем ID клиента в состоянии
+        await state.update_data(
+            client_id=client_id,
+            client_name=user.first_name,
+            client_username=user.username
+        )
+        await state.set_state(AdminStates.waiting_general_client_message)
+        
+        # Получаем язык пользователя
+        from i18n import i18n
+        user_language = i18n.get_user_language(client_id)
+        language_names = {'ru': 'Русский', 'ka': 'ქართული', 'en': 'English'}
+        
+        await message.answer(
+            _("admin.general_message_client_form", admin_language).format(
+                client_id=client_id,
+                client_name=user.first_name,
+                client_username=f"@{user.username}" if user.username else "нет",
+                user_language=language_names.get(user_language, user_language)
+            ),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=_("common.cancel", admin_language), callback_data="admin_panel")]
+            ]),
+            parse_mode='HTML'
+        )
+        
+    except ValueError:
+        await message.answer(
+            _("admin.invalid_client_id", admin_language),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=_("common.to_admin", admin_language), callback_data="admin_panel")]
+            ]),
+            parse_mode='HTML'
+        )
+        await state.clear()
+
+@router.message(AdminStates.waiting_general_client_message)
+async def process_general_client_message(message: Message, state: FSMContext):
+    """Обработать и отправить общее сообщение клиенту"""
+    admin_language = 'ru'  # Язык администратора
+    data = await state.get_data()
+    client_id = data.get('client_id')
+    client_name = data.get('client_name')
+    
+    if not client_id:
+        await message.answer(_("error.client_id_not_found", admin_language))
+        await state.clear()
+        return
+    
+    # Форматируем сообщение для клиента на его языке
+    client_message = (
+        f"{_('admin_message.header', user_id=client_id)}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{message.text}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<i>{_('admin_message.footer', user_id=client_id)}</i>"
+    )
+    
+    try:
+        # Отправляем сообщение клиенту
+        await message.bot.send_message(
+            client_id,
+            client_message,
+            parse_mode='HTML'
+        )
+        
+        # Подтверждение админу
+        await message.answer(
+            _("admin.general_message_sent_success", admin_language).format(
+                client_id=client_id,
+                client_name=client_name
+            ),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=_("admin.message_client", admin_language), callback_data="admin_message_client")],
+                [InlineKeyboardButton(text=_("common.to_admin", admin_language), callback_data="admin_panel")]
+            ]),
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        await message.answer(
+            _("admin.general_message_send_error", admin_language).format(
+                client_name=client_name,
+                error=str(e)
+            ),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=_("admin.message_client", admin_language), callback_data="admin_message_client")],
+                [InlineKeyboardButton(text=_("common.to_admin", admin_language), callback_data="admin_panel")]
+            ]),
+            parse_mode='HTML'
+        )
+    
+    await state.clear()
+
 @router.message(F.text, lambda message: message.from_user.id in ADMIN_IDS)
 async def process_admin_message(message: Message, state: FSMContext):
     """Обработка сообщений от админа в зависимости от состояния"""
     current_state = await state.get_state()
+    print(f"DEBUG: Current state = {current_state}")  # Временное логирование
     
     if current_state == "waiting_order_search":
         await process_order_search(message, state)
     elif current_state == "waiting_quantity_input":
         await process_quantity_input(message, state)
-    elif current_state in ["AdminManagementStates:waiting_admin_id", "AdminStates:waiting_admin_id"]:
-        # Пропускаем - обрабатывается в admin_management.py
+    elif current_state in ["AdminManagementStates:waiting_admin_id", "AdminStates:waiting_admin_id", "AdminStates:waiting_client_message", "AdminStates:waiting_client_id", "AdminStates:waiting_general_client_message"]:
+        # Пропускаем - обрабатывается специфичными обработчиками
         return
     else:
         # Если не в состоянии поиска, удаляем сообщение
@@ -762,12 +943,18 @@ async def show_admin_order(callback: CallbackQuery):
         'cancelled': '❌ Отменен'
     }
     
+    # Получаем язык пользователя
+    from i18n import i18n
+    user_language = i18n.get_user_language(order.user_id)
+    language_names = {'ru': 'Русский', 'ka': 'ქართული', 'en': 'English'}
+    
     order_text = f"""📋 <b>Заказ #{order.order_number}</b>
 
 👤 <b>Клиент:</b>
 • Имя: {user.first_name if user else 'Неизвестно'}
 • Username: @{user.username if user and user.username else 'нет'}
 • ID: {order.user_id}
+• 🌐 Язык: {language_names.get(user_language, user_language)}
 
 📦 <b>Товары:</b>
 """
@@ -1618,4 +1805,81 @@ async def show_filtered_orders_page(callback: CallbackQuery, filter_type: str, p
             reply_markup=keyboard,
             parse_mode='HTML'
         )
+
+
+
+# ============== СИСТЕМА СООБЩЕНИЙ АДМИН -> КЛИЕНТ ==============
+
+@router.callback_query(F.data.startswith("admin_message_client_"), admin_filter)
+async def start_message_to_client(callback: CallbackQuery, state: FSMContext):
+    """Начать отправку сообщения клиенту"""
+    order_id = int(callback.data.split("_")[3])
+    order = await db.get_order(order_id)
+    
+    if not order:
+        await callback.answer("❌ Заказ не найден", show_alert=True)
+        return
+    
+    # Сохраняем в состоянии ID клиента и номер заказа
+    await state.update_data(
+        client_id=order.user_id,
+        order_number=order.order_number,
+        order_id=order_id
+    )
+    await state.set_state(AdminStates.waiting_client_message)
+    
+    # Получаем язык пользователя
+    from i18n import i18n
+    user_language = i18n.get_user_language(order.user_id)
+    language_names = {'ru': 'Русский', 'ka': 'ქართული', 'en': 'English'}
+    
+    # Получаем язык администратора (пока что русский по умолчанию)
+    admin_language = 'ru'  # Можно расширить для поддержки языка админа
+    
+    # Важно: отвечаем на callback
+    await callback.answer()
+    
+    try:
+        await callback.message.edit_text(
+            _("admin.message_client_form", admin_language).format(
+                order_number=order.order_number,
+                user_id=order.user_id,
+                user_language=language_names.get(user_language, user_language)
+            ),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=_("common.cancel", admin_language), callback_data=f"admin_order_{order_id}")]
+            ]),
+            parse_mode='HTML'
+        )
+    except Exception:
+        # Если не удается отредактировать сообщение, отправляем новое
+        await callback.message.answer(
+            _("admin.message_client_form", admin_language).format(
+                order_number=order.order_number,
+                user_id=order.user_id,
+                user_language=language_names.get(user_language, user_language)
+            ),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=_("common.cancel", admin_language), callback_data=f"admin_order_{order_id}")]
+            ]),
+            parse_mode='HTML'
+        )
+
+
+# Общая функция для связи с клиентом по ID
+@router.callback_query(F.data == "admin_message_client", admin_filter)
+async def start_general_message_to_client(callback: CallbackQuery, state: FSMContext):
+    """Начать отправку сообщения клиенту по ID"""
+    admin_language = 'ru'  # Язык администратора
+    
+    await callback.answer()
+    await callback.message.edit_text(
+        _("admin.message_client_id_form", admin_language),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=_("common.cancel", admin_language), callback_data="admin_panel")]
+        ]),
+        parse_mode='HTML'
+    )
+    
+    await state.set_state(AdminStates.waiting_client_id)
 

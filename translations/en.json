@@ -77,7 +77,11 @@
   
   "contact": {
     "title": "💬 <b>Contact Us</b>",
-    "description": "❓ <b>For questions:</b>\n• Order status\n• Product help\n• Technical issues\n• Suggestions and complaints\n\n⚡ <b>Quick response during business hours!</b>"
+    "description": "❓ <b>For questions:</b>\n• Order status\n• Product help\n• Technical issues\n• Suggestions and complaints\n\n⚡ <b>Quick response during business hours!</b>",
+    "message_admin": "✉️ Message Administrator",
+    "message_form": "✉️ <b>Message to Administrator</b>\n\nEnter your message:\n\n<i>💡 Your message will be sent to the administrator and they will contact you soon.</i>",
+    "message_sent": "✅ <b>Message Sent</b>\n\nYour message has been forwarded to the administrator. Expect a response soon.",
+    "message_error": "❌ <b>Send Error</b>\n\nFailed to send message. Please try later or contact us by phone."
   },
   
   "info": {
@@ -111,7 +115,8 @@
     "edit_categories": "📝 Edit Categories",
     "back_to_panel": "🔙 Admin Panel",
     "back_to_products": "🔙 Product Management",
-    "back_to_categories": "🔙 Category Management"
+    "back_to_categories": "🔙 Category Management",
+    "message_client_form": "💬 <b>Send Message to Client</b>\n\n📋 Order: #{order_number}\n👤 Client ID: {user_id}\n🌐 Client Language: {user_language}\n\nEnter message to send to client:\n\n<i>💡 Message will be sent on behalf of the bot with admin signature.</i>"
   },
 
   "language": {
@@ -166,5 +171,11 @@
   "welcome": {
     "title": "👋 Welcome to Tbilisi VAPE Shop!",
     "description": "🛍 Here you'll find the best disposable cigarettes in Tbilisi at great prices with fast delivery."
+  },
+
+  "admin_message": {
+    "header": "📨 Message from administrator",
+    "order_prefix": "📋 Regarding order #",
+    "footer": "To reply, use the \"Contact\" button in the main menu"
   }
 }

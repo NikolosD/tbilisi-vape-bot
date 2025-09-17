@@ -33,6 +33,7 @@ class OrderStates(StatesGroup):
     waiting_contact = State()
     waiting_address = State()
     waiting_payment_screenshot = State()
+    waiting_admin_message = State()
 
 # Обработчик текстовых сообщений из главного меню
 @router.message(is_catalog_button)
@@ -925,3 +926,109 @@ async def callback_language(callback: CallbackQuery):
     await page_manager.profile.show_from_callback(callback, type='language')
 
 # Все callback функции теперь используют page_manager - дублированный код удален
+
+@router.callback_query(F.data == "message_admin")
+async def start_message_to_admin(callback: CallbackQuery, state: FSMContext):
+    """Начать отправку сообщения администратору"""
+    user_id = callback.from_user.id
+    
+    await callback.answer()
+    await callback.message.edit_text(
+        _("contact.message_form", user_id=user_id),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=_("common.cancel", user_id=user_id), callback_data="contact")]
+        ]),
+        parse_mode='HTML'
+    )
+    
+    await state.set_state(OrderStates.waiting_admin_message)
+
+@router.message(OrderStates.waiting_admin_message, F.text)
+async def process_admin_message(message: Message, state: FSMContext):
+    """Обработать сообщение для администратора"""
+    user_id = message.from_user.id
+    
+    try:
+        # Отправляем сообщение всем админам
+        from config import ADMIN_IDS, SUPER_ADMIN_ID
+        admin_message = (
+            f"📨 <b>Новое сообщение от пользователя</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"👤 <b>От:</b> {message.from_user.first_name}"
+        )
+        
+        if message.from_user.username:
+            admin_message += f" (@{message.from_user.username})"
+        
+        admin_message += f"\n🆔 <b>ID:</b> {user_id}\n\n"
+        admin_message += f"💬 <b>Сообщение:</b>\n{message.text}\n\n"
+        admin_message += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        admin_message += f"<i>Для ответа используйте функцию «Написать клиенту» в панели администратора</i>"
+        
+        # Отправляем супер-админу
+        if SUPER_ADMIN_ID:
+            await message.bot.send_message(
+                SUPER_ADMIN_ID,
+                admin_message,
+                parse_mode='HTML'
+            )
+        
+        # Отправляем всем админам
+        for admin_id in ADMIN_IDS:
+            if admin_id != SUPER_ADMIN_ID:  # Избегаем дублирования
+                try:
+                    await message.bot.send_message(
+                        admin_id,
+                        admin_message,
+                        parse_mode='HTML'
+                    )
+                except Exception:
+                    pass  # Игнорируем ошибки отправки отдельным админам
+        
+        # Подтверждение пользователю
+        await message.answer(
+            _("contact.message_sent", user_id=user_id),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=_("common.main_menu", user_id=user_id), callback_data="main_menu")]
+            ]),
+            parse_mode='HTML'
+        )
+        
+    except Exception as e:
+        # Ошибка отправки
+        await message.answer(
+            _("contact.message_error", user_id=user_id),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=_("common.main_menu", user_id=user_id), callback_data="main_menu")]
+            ]),
+            parse_mode='HTML'
+        )
+    
+    await state.clear()
+
+@router.callback_query(F.data == "main_menu")
+async def callback_main_menu(callback: CallbackQuery):
+    """Вернуться в главное меню"""
+    user_id = callback.from_user.id
+    await callback.answer()
+    
+    # Проверяем, является ли пользователь админом
+    from config import ADMIN_IDS, SUPER_ADMIN_ID
+    is_admin = user_id in ADMIN_IDS or user_id == SUPER_ADMIN_ID
+    
+    try:
+        await callback.message.edit_text(
+            _("welcome.title", user_id=user_id) + "\n\n" + 
+            _("welcome.description", user_id=user_id),
+            reply_markup=get_main_menu_inline(is_admin=is_admin, user_id=user_id),
+            parse_mode='HTML'
+        )
+    except Exception:
+        # Если не удается отредактировать, отправляем новое сообщение
+        await callback.message.delete()
+        await callback.message.answer(
+            _("welcome.title", user_id=user_id) + "\n\n" + 
+            _("welcome.description", user_id=user_id),
+            reply_markup=get_main_menu_inline(is_admin=is_admin, user_id=user_id),
+            parse_mode='HTML'
+        )
