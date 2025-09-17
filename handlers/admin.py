@@ -45,7 +45,7 @@ async def show_admin_panel(callback: CallbackQuery):
     checking_orders = await db.get_checking_orders()
     paid_orders = await db.get_paid_orders()
     shipping_orders = await db.get_shipping_orders()
-    products = await db.get_products()
+    products = await db.get_all_products()
     
     await callback.message.edit_text(
         f"🔧 <b>Улучшенная админ-панель</b>\n\n"
@@ -64,7 +64,7 @@ async def show_admin_panel(callback: CallbackQuery):
 @router.callback_query(F.data == "admin_products", admin_filter)
 async def admin_products_menu(callback: CallbackQuery):
     """Меню управления товарами"""
-    products = await db.get_products()
+    products = await db.get_all_products()
     
     await callback.message.edit_text(
         f"📦 <b>Управление товарами</b>\n\n"
@@ -76,7 +76,7 @@ async def admin_products_menu(callback: CallbackQuery):
 @router.callback_query(F.data == "admin_edit_products", admin_filter)
 async def admin_edit_products(callback: CallbackQuery):
     """Показать список товаров для редактирования"""
-    products = await db.get_products()
+    products = await db.get_all_products()
     
     if not products:
         await callback.message.edit_text(
@@ -91,8 +91,8 @@ async def admin_edit_products(callback: CallbackQuery):
     for product in products:
         keyboard.append([
             InlineKeyboardButton(
-                text=f"✏️ {product[1]} - {product[2]}₾",
-                callback_data=f"edit_product_{product[0]}"
+                text=f"✏️ {product.name} - {product.price}₾",
+                callback_data=f"edit_product_{product.id}"
             )
         ])
     
@@ -121,13 +121,13 @@ async def edit_product_menu(callback: CallbackQuery):
         [InlineKeyboardButton(text="🔙 Список товаров", callback_data="admin_edit_products")]
     ]
     
-    stock_status = "✅ В наличии" if product[6] else "❌ Скрыт"
+    stock_status = "✅ В наличии" if product.in_stock else "❌ Скрыт"
     
     await callback.message.edit_text(
         f"✏️ <b>Редактирование товара</b>\n\n"
-        f"📝 <b>Название:</b> {product[1]}\n"
-        f"💰 <b>Цена:</b> {product[2]}₾\n"
-        f"📋 <b>Описание:</b> {product[3] or 'Нет описания'}\n"
+        f"📝 <b>Название:</b> {product.name}\n"
+        f"💰 <b>Цена:</b> {product.price}₾\n"
+        f"📋 <b>Описание:</b> {product.description or 'Нет описания'}\n"
         f"📦 <b>Статус:</b> {stock_status}\n\n"
         f"Выберите действие:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
@@ -178,7 +178,7 @@ async def toggle_product_stock(callback: CallbackQuery):
         await callback.answer(_("common.not_found", user_id=callback.from_user.id), show_alert=True)
         return
     
-    new_stock = not product[6]  # Инвертируем статус
+    new_stock = not product.in_stock  # Инвертируем статус
     await db.update_product_stock(product_id, new_stock)
     
     status_text = "показан в каталоге" if new_stock else "скрыт из каталога"
@@ -196,9 +196,9 @@ async def toggle_product_stock(callback: CallbackQuery):
     
     await callback.message.edit_text(
         f"✏️ <b>Редактирование товара</b>\n\n"
-        f"📝 <b>Название:</b> {product[1]}\n"
-        f"💰 <b>Цена:</b> {product[2]}₾\n"
-        f"📋 <b>Описание:</b> {product[3] or 'Нет описания'}\n"
+        f"📝 <b>Название:</b> {product.name}\n"
+        f"💰 <b>Цена:</b> {product.price}₾\n"
+        f"📋 <b>Описание:</b> {product.description or 'Нет описания'}\n"
         f"📦 <b>Статус:</b> {stock_status}\n\n"
         f"Выберите действие:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
@@ -520,6 +520,9 @@ async def confirm_payment(callback: CallbackQuery):
             f"✅ <b>Оплата подтверждена!</b>\n\n"
             f"Заказ #{order.order_number} принят в обработку.\n"
             f"Готовим ваш заказ к отправке! 📦",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_menu")]
+            ]),
             parse_mode='HTML'
         )
     except:
@@ -550,6 +553,9 @@ async def reject_payment(callback: CallbackQuery):
             f"❌ <b>Оплата не подтверждена</b>\n\n"
             f"Заказ #{order.order_number}: Скриншот оплаты не прошел проверку.\n"
             f"Пожалуйста, проверьте корректность перевода и пришлите новый скриншот.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_menu")]
+            ]),
             parse_mode='HTML'
         )
     except:
@@ -1112,6 +1118,9 @@ async def quick_confirm_payment(callback: CallbackQuery):
             await callback.bot.send_message(
                 order.user_id,
                 client_text,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_menu")]
+                ]),
                 parse_mode='HTML'
             )
         except:
@@ -1147,6 +1156,9 @@ async def quick_reject_payment(callback: CallbackQuery):
             await callback.bot.send_message(
                 order.user_id,
                 client_text,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_menu")]
+                ]),
                 parse_mode='HTML'
             )
         except:

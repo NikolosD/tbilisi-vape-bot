@@ -48,6 +48,10 @@ async def cmd_start(message: Message):
     # Добавляем пользователя в базу данных
     await db.add_user(user_id, username, first_name)
     
+    # Очищаем старые сообщения при старте
+    from message_manager import message_manager
+    await message_manager.delete_user_message(message.bot, user_id)
+    
     # Проверяем, является ли пользователь администратором
     is_admin = user_id in ADMIN_IDS
     
@@ -57,11 +61,14 @@ async def cmd_start(message: Message):
 
 Выберите действие в меню ниже:"""
     
-    await message.answer(
+    sent_message = await message.answer(
         welcome_text,
         reply_markup=get_main_menu(is_admin=is_admin, user_id=user_id),
         parse_mode='HTML'
     )
+    
+    # Сохраняем ID отправленного сообщения
+    message_manager.set_user_message(user_id, sent_message.message_id, 'main')
 
 @dp.message(Command("admin"))
 async def cmd_admin(message: Message):

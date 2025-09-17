@@ -80,7 +80,14 @@ class Database:
     async def get_category(self, category_id):
         """Получение категории по ID"""
         query = "SELECT * FROM categories WHERE id = $1"
-        return await self.fetchone(query, category_id)
+        row = await self.fetchone(query, category_id)
+        if row:
+            return Category(
+                id=row['id'],
+                name=row['name'],
+                emoji=row['emoji']
+            )
+        return None
     
     # Методы для работы с товарами
     async def add_product(self, name, price, description, photo=None, category_id=None):
@@ -106,10 +113,58 @@ class Database:
                        ORDER BY p.id"""
             return await self.fetchall(query)
     
+    async def get_products_by_category(self, category_id):
+        """Получение товаров по категории"""
+        query = """SELECT * FROM products 
+                   WHERE category_id = $1 AND in_stock = true 
+                   ORDER BY id"""
+        rows = await self.fetchall(query, category_id)
+        return [
+            Product(
+                id=row['id'],
+                name=row['name'],
+                price=row['price'],
+                description=row['description'],
+                photo=row['photo'],
+                category_id=row['category_id'],
+                in_stock=row['in_stock'],
+                created_at=row['created_at']
+            ) for row in rows
+        ]
+    
+    async def get_all_products(self):
+        """Получение всех товаров (для админки)"""
+        query = """SELECT * FROM products ORDER BY id"""
+        rows = await self.fetchall(query)
+        return [
+            Product(
+                id=row['id'],
+                name=row['name'],
+                price=row['price'],
+                description=row['description'],
+                photo=row['photo'],
+                category_id=row['category_id'],
+                in_stock=row['in_stock'],
+                created_at=row['created_at']
+            ) for row in rows
+        ]
+    
     async def get_product(self, product_id):
         """Получение товара по ID"""
         query = "SELECT * FROM products WHERE id = $1"
-        return await self.fetchone(query, product_id)
+        row = await self.fetchone(query, product_id)
+        if row:
+            return Product(
+                id=row['id'],
+                name=row['name'],
+                price=row['price'],
+                description=row['description'],
+                photo=row['photo'],
+                category_id=row['category_id'],
+                in_stock=row['in_stock'],
+                created_at=row['created_at']
+            )
+        return None
     
     async def update_product_stock(self, product_id, in_stock):
         """Обновление наличия товара"""
@@ -196,6 +251,18 @@ class Database:
         query = "SELECT id, order_number, user_id, products, total_price, delivery_zone, delivery_price, phone, address, status, payment_screenshot, created_at FROM orders WHERE user_id = $1 ORDER BY created_at DESC"
         rows = await self.fetchall(query, user_id)
         return [Order(*row) for row in rows]
+    
+    async def get_user_orders_count(self, user_id) -> int:
+        """Получение количества заказов пользователя"""
+        query = "SELECT COUNT(*) FROM orders WHERE user_id = $1"
+        row = await self.fetchone(query, user_id)
+        return row[0] if row else 0
+    
+    async def get_order_items(self, order_id):
+        """Получение товаров заказа"""
+        # Пока что возвращаем пустой список, так как структура заказов хранится в JSON
+        # В будущем можно добавить отдельную таблицу order_items
+        return []
     
     async def update_order_status(self, order_id, status):
         """Обновление статуса заказа"""

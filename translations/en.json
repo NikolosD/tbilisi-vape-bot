@@ -29,7 +29,7 @@
   "cart": {
     "title": "🛒 <b>Your Cart:</b>",
     "empty": "🛒 <b>Your cart is empty</b>\n\nAdd products from catalog!",
-    "item": "• {name}\n  Quantity: {quantity} pcs.\n  Price: {price}₾ × {quantity} = {total}₾\n",
+    "item": "🛍️ <b>{name}</b>\n📦 {quantity} pcs. × {price}₾ = <b>{total}₾</b>\n\n",
     "total": "💰 <b>Total: {total}₾</b>",
     "checkout": "📝 Checkout",
     "clear": "🗑 Clear cart",
@@ -45,6 +45,7 @@
   "orders": {
     "title": "📋 <b>My Orders</b>",
     "empty": "📋 <b>You have no orders yet</b>\n\nPlace your first order in catalog!",
+    "order": "Order",
     "select_order": "Select order to view details:",
     "order_info": "📋 <b>Order #{order_id}</b>\n📅 {date}\n💰 {total}₾\n📊 {status}",
     "view_details": "👁 Details",
@@ -57,6 +58,9 @@
     "status_shipping": "🚚 Shipping",
     "status_delivered": "✅ Delivered",
     "status_cancelled": "❌ Cancelled",
+    "items": "Items:",
+    "total": "Total:",
+    "admin_comment": "Comment:",
     "canceled": "✅ Order cancelled",
     "cannot_cancel": "❌ Cannot cancel order",
     "cancel": "❌ Cancel order"
@@ -135,6 +139,14 @@
     "my_orders": "📋 My orders",
     "share_phone": "📱 Share phone number",
     "resend_screenshot": "📸 Resend receipt",
-    "order_number": "Order #{order_id} - {total}₾"
+    "order_number": "Order #{order_id} - {total}₾",
+    "page": "Page",
+    "prev_page": "Prev",
+    "next_page": "Next"
+  },
+
+  "welcome": {
+    "title": "👋 Welcome to Tbilisi VAPE Shop!",
+    "description": "🛍 Here you'll find the best disposable cigarettes in Tbilisi at great prices with fast delivery."
   }
 }

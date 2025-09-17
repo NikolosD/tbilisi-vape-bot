@@ -74,10 +74,16 @@ def get_categories_keyboard(categories):
 def get_catalog_keyboard(products):
     keyboard = []
     for product in products:
+        # Проверяем, является ли product объектом Product или кортежем
+        if hasattr(product, 'name'):  # Это объект Product
+            name, price, product_id = product.name, product.price, product.id
+        else:  # Это кортеж (старый формат)
+            name, price, product_id = product[1], product[2], product[0]
+            
         keyboard.append([
             InlineKeyboardButton(
-                text=f"{product[1]} - {product[2]}₾",
-                callback_data=f"product_{product[0]}"
+                text=f"{name} - {price}₾",
+                callback_data=f"product_{product_id}"
             )
         ])
     keyboard.append([InlineKeyboardButton(text=_("common.to_categories"), callback_data="catalog")])
@@ -87,10 +93,16 @@ def get_catalog_keyboard(products):
 def get_category_products_keyboard(products, category_id):
     keyboard = []
     for product in products:
+        # Проверяем, является ли product объектом Product или кортежем
+        if hasattr(product, 'name'):  # Это объект Product
+            name, price, product_id = product.name, product.price, product.id
+        else:  # Это кортеж (старый формат)
+            name, price, product_id = product[1], product[2], product[0]
+            
         keyboard.append([
             InlineKeyboardButton(
-                text=f"{product[1]} - {product[2]}₾",
-                callback_data=f"product_{product[0]}_from_{category_id}"
+                text=f"{name} - {price}₾",
+                callback_data=f"product_{product_id}_from_{category_id}"
             )
         ])
     keyboard.append([InlineKeyboardButton(text=_("common.to_categories"), callback_data="catalog")])
@@ -349,6 +361,13 @@ def get_change_status_keyboard(order_id):
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # Выбор языка
+# Простая клавиатура с кнопкой "Назад в главное меню"
+def get_back_to_menu_keyboard(user_id=None):
+    keyboard = [
+        [InlineKeyboardButton(text=_("common.main_menu", user_id=user_id), callback_data="back_to_menu")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
 def get_language_keyboard(user_id=None):
     keyboard = []
     

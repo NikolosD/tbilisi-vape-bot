@@ -4,6 +4,7 @@
 from typing import NamedTuple, Optional, List, Dict, Any
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 
 
 class User(NamedTuple):
@@ -31,7 +32,8 @@ class Product(NamedTuple):
     description: Optional[str]
     photo: Optional[str]
     category_id: int
-    stock: int
+    in_stock: bool
+    created_at: datetime
     
 
 class CartItem(NamedTuple):
@@ -65,25 +67,14 @@ class Order(NamedTuple):
         return json.loads(self.products)
 
 
-class OrderStatus:
+class OrderStatus(Enum):
     """Статусы заказов"""
+    PENDING = 'pending'
+    CONFIRMED = 'confirmed'
+    PROCESSING = 'processing'
+    SHIPPED = 'shipped'
+    DELIVERED = 'delivered'
+    CANCELLED = 'cancelled'
     WAITING_PAYMENT = 'waiting_payment'
     PAYMENT_CHECK = 'payment_check'
     PAID = 'paid'
-    SHIPPING = 'shipping'
-    DELIVERED = 'delivered'
-    CANCELLED = 'cancelled'
-    
-    STATUS_TEXTS = {
-        WAITING_PAYMENT: '⏳ Ожидает оплаты',
-        PAYMENT_CHECK: '💰 Проверка оплаты',
-        PAID: '✅ Оплачен, готовится к отправке',
-        SHIPPING: '🚚 Отправлен',
-        DELIVERED: '✅ Доставлен',
-        CANCELLED: '❌ Отменен'
-    }
-    
-    @classmethod
-    def get_text(cls, status: str) -> str:
-        """Получить текстовое представление статуса"""
-        return cls.STATUS_TEXTS.get(status, status)
