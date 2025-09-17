@@ -50,6 +50,11 @@ async def cmd_start(message: Message):
     # Добавляем пользователя в базу данных
     await db.add_user(user_id, username, first_name)
     
+    # Устанавливаем язык по умолчанию для новых пользователей
+    from i18n import i18n
+    if user_id not in i18n.user_languages:
+        i18n.set_language('ru', user_id)
+    
     # Очищаем старые сообщения при старте
     from message_manager import message_manager
     await message_manager.delete_user_message(message.bot, user_id)
@@ -61,7 +66,7 @@ async def cmd_start(message: Message):
 
 {_('welcome.description', user_id=user_id)}
 
-Выберите действие в меню ниже:"""
+{_('common.select_action', user_id=user_id)}"""
     
     sent_message = await message.answer(
         welcome_text,

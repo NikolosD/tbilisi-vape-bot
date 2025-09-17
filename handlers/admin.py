@@ -35,6 +35,7 @@ class AdminStates(StatesGroup):
     waiting_client_message = State()
     waiting_client_id = State()
     waiting_general_client_message = State()
+    waiting_rejection_reason = State()
 
 # Фильтр для админов (синхронная версия для совместимости)
 def admin_filter(message_or_callback):
@@ -911,6 +912,56 @@ async def process_order_search(message: Message, state: FSMContext):
             parse_mode='HTML'
         )
 
+# Специфичные обработчики должны быть ПЕРЕД общим admin_order_
+@router.callback_query(F.data.startswith("admin_reject_payment_"), admin_filter)
+async def reject_payment(callback: CallbackQuery, state: FSMContext):
+    """Отклонить оплату заказа - запрос причины"""
+    print(f"DEBUG: reject_payment вызван с callback_data: {callback.data}")
+    order_id = int(callback.data.split("_")[3])
+    print(f"DEBUG: Извлечен order_id: {order_id}")
+    order = await db.get_order(order_id)
+    
+    if not order:
+        await callback.answer(_("admin.order_not_found", user_id=callback.from_user.id), show_alert=True)
+        return
+    
+    # Получаем язык пользователя
+    user = await db.get_user(order.user_id)
+    user_lang = 'ru'  # По умолчанию русский
+    if user:
+        # Здесь можно получить сохраненный язык пользователя из БД или i18n
+        from i18n import i18n
+        user_lang = i18n.get_user_language(order.user_id) or 'ru'
+    
+    # Сохраняем данные заказа в состояние
+    await state.update_data(
+        order_id=order_id, 
+        order_number=order.order_number, 
+        user_id=order.user_id,
+        total_price=order.total_price,
+        user_lang=user_lang
+    )
+    
+    # Запрашиваем причину отклонения
+    from i18n import _
+    lang_names = {'ru': '🇷🇺 Русский', 'en': '🇺🇸 English', 'ka': '🇬🇪 ქართული'}
+    
+    text = _("admin.rejection_form", user_id=callback.from_user.id, 
+             order_number=order.order_number, 
+             total_price=order.total_price,
+             user_language=lang_names.get(user_lang, user_lang))
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin_order_{order_id}")]
+    ])
+    
+    # Проверяем тип сообщения и используем соответствующий метод
+    if callback.message.photo:
+        await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode='HTML')
+    else:
+        await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode='HTML')
+    
+    await state.set_state(AdminStates.waiting_rejection_reason)
 
 @router.callback_query(F.data.startswith("admin_order_"), admin_filter)
 async def show_admin_order(callback: CallbackQuery):
@@ -1031,38 +1082,64 @@ async def confirm_payment(callback: CallbackQuery):
     # Обновляем отображение
     await show_admin_order(callback)
 
-@router.callback_query(F.data.startswith("admin_reject_payment_"), admin_filter)
-async def reject_payment(callback: CallbackQuery):
-    """Отклонить оплату заказа"""
-    order_id = int(callback.data.split("_")[3])
-    order = await db.get_order(order_id)
+@router.message(AdminStates.waiting_rejection_reason, admin_filter)
+async def process_rejection_reason(message: Message, state: FSMContext):
+    """Обработка причины отклонения платежа"""
+    reason = message.text
+    data = await state.get_data()
     
-    if not order:
-        await callback.answer("❌ Заказ не найден", show_alert=True)
+    order_id = data.get('order_id')
+    order_number = data.get('order_number')
+    user_id = data.get('user_id')
+    total_price = data.get('total_price')
+    user_lang = data.get('user_lang', 'ru')
+    
+    if not order_id:
+        await message.answer(_("admin.rejection_data_error", user_id=message.from_user.id))
+        await state.clear()
         return
     
-    # Возвращаем статус
+    # Обновляем статус заказа
     await db.update_order_status(order_id, 'waiting_payment')
     
-    # Уведомляем клиента
+    # Импортируем функцию перевода
+    from i18n import _
+    
+    # Используем переводы для сообщения пользователю
+    message_text = _("admin.payment_rejected", user_id=user_id, 
+                    order_number=order_number, 
+                    total_price=total_price,
+                    reason=reason)
+    
+    resend_text = _("admin.resend_screenshot", user_id=user_id)
+    contact_text = _("admin.contact_support", user_id=user_id)
+    menu_text = _("common.main_menu", user_id=user_id)
+    
+    # Уведомляем клиента с причиной и кнопками
     try:
-        await callback.message.bot.send_message(
-            order.user_id,
-            f"❌ <b>Оплата не подтверждена</b>\n\n"
-            f"Заказ #{order.order_number}: Скриншот оплаты не прошел проверку.\n"
-            f"Пожалуйста, проверьте корректность перевода и пришлите новый скриншот.",
+        await message.bot.send_message(
+            user_id,
+            message_text,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_menu")]
+                [InlineKeyboardButton(text=resend_text, callback_data=f"resend_screenshot_{order_number}")],
+                [InlineKeyboardButton(text=contact_text, callback_data="contact")],
+                [InlineKeyboardButton(text=menu_text, callback_data="back_to_menu")]
             ]),
             parse_mode='HTML'
         )
-    except:
-        pass
+        await message.answer(_("admin.rejection_success", user_id=message.from_user.id))
+    except Exception as e:
+        await message.answer(_("admin.rejection_error", user_id=message.from_user.id, error=str(e)))
     
-    await callback.answer("❌ Оплата отклонена!")
+    # Очищаем состояние
+    await state.clear()
     
-    # Обновляем отображение
-    await show_admin_order(callback)
+    # Показываем админу список заказов
+    await message.answer(
+        "📋 <b>Управление заказами</b>",
+        reply_markup=get_admin_orders_keyboard(),
+        parse_mode='HTML'
+    )
 
 @router.callback_query(F.data.startswith("admin_ship_"), admin_filter)
 async def ship_order(callback: CallbackQuery):

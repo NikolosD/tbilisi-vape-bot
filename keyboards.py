@@ -156,10 +156,11 @@ def get_cart_keyboard(cart_items):
     
     for item in cart_items:
         keyboard.append([
-            InlineKeyboardButton(text=f"{item.name} ({item.quantity})", callback_data=f"product_{item.product_id}")
+            InlineKeyboardButton(text=f"{item.name} ({item.quantity})", callback_data=f"noop")
         ])
         keyboard.append([
             InlineKeyboardButton(text="➖", callback_data=f"cart_decrease_{item.product_id}"),
+            InlineKeyboardButton(text="🔢", callback_data=f"cart_input_qty_{item.product_id}"),
             InlineKeyboardButton(text="➕", callback_data=f"cart_increase_{item.product_id}")
         ])
     
@@ -465,7 +466,6 @@ def get_payment_notification_keyboard(order_id, user_id=None):
             InlineKeyboardButton(text=f"✅ {_('common.confirm', user_id=user_id)}", callback_data=f"quick_confirm_{order_id}"),
             InlineKeyboardButton(text=f"❌ {_('admin_actions.reject_payment', user_id=user_id)}", callback_data=f"quick_reject_{order_id}")
         ],
-        [InlineKeyboardButton(text=f"📋 {_('orders.view_details', user_id=user_id)}", callback_data=f"admin_order_{order_id}")],
         [InlineKeyboardButton(text=f"📊 {_('admin.all_orders', user_id=user_id)}", callback_data="admin_orders")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

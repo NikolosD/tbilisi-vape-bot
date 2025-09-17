@@ -60,6 +60,8 @@ class Order(NamedTuple):
     status: str
     payment_screenshot: Optional[str]
     created_at: datetime
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     
     @property
     def products_data(self) -> List[Dict[str, Any]]:

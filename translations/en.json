@@ -124,7 +124,15 @@
     "back_to_panel": "🔙 Admin Panel",
     "back_to_products": "🔙 Product Management",
     "back_to_categories": "🔙 Category Management",
-    "message_client_form": "💬 <b>Send Message to Client</b>\n\n📋 Order: #{order_number}\n👤 Client ID: {user_id}\n🌐 Client Language: {user_language}\n\nEnter message to send to client:\n\n<i>💡 Message will be sent on behalf of the bot with admin signature.</i>"
+    "message_client_form": "💬 <b>Send Message to Client</b>\n\n📋 Order: #{order_number}\n👤 Client ID: {user_id}\n🌐 Client Language: {user_language}\n\nEnter message to send to client:\n\n<i>💡 Message will be sent on behalf of the bot with admin signature.</i>",
+    "rejection_form": "❌ <b>Payment Rejection</b>\n\n📋 Order: #{order_number}\n💰 Amount: {total_price}₾\n🌐 Client Language: {user_language}\n\n📝 <b>Specify rejection reason:</b>\n<i>This reason will be sent to the client in their language ({user_language})</i>",
+    "rejection_success": "✅ Payment rejected, client notified",
+    "rejection_error": "❌ Failed to send notification to client: {error}",
+    "order_not_found": "❌ Order not found",
+    "rejection_data_error": "❌ Error: order data not found",
+    "payment_rejected": "❌ <b>Payment not confirmed</b>\n\n📋 Order #{order_number}\n💰 Amount: {total_price}₾\n\n<b>Reason:</b> {reason}\n\nPlease check the transfer details and send a new screenshot.\nOr contact support for more information.",
+    "resend_screenshot": "📸 Resend screenshot",
+    "contact_support": "💬 Contact support"
   },
 
   "language": {
@@ -165,7 +173,8 @@
     "order_number": "Order #{order_id} - {total}₾",
     "page": "Page",
     "prev_page": "Prev",
-    "next_page": "Next"
+    "next_page": "Next",
+    "select_action": "Choose an action from the menu below:"
   },
 
   "error": {
@@ -178,7 +187,8 @@
     "stock_limit": "❌ Only {stock} pcs in stock. Try again:",
     "invalid_number": "❌ Enter a valid number from 1 to 999:",
     "product_not_found": "❌ Error: product not found",
-    "quantity_input_cancelled": "❌ Quantity input cancelled"
+    "quantity_input_cancelled": "❌ Quantity input cancelled",
+    "order_not_found": "❌ Order not found"
   },
 
   "welcome": {
