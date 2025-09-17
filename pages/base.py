@@ -35,7 +35,8 @@ class BasePage(ABC):
             bot, user_id,
             page_data.get('text', ''),
             reply_markup=page_data.get('keyboard'),
-            menu_state=self.menu_state
+            menu_state=self.menu_state,
+            photo=page_data.get('photo')
         )
     
     async def show_from_message(self, message: Message, **kwargs):
@@ -47,7 +48,8 @@ class BasePage(ABC):
             message.bot, message.from_user.id,
             page_data.get('text', ''),
             reply_markup=page_data.get('keyboard'),
-            menu_state=self.menu_state
+            menu_state=self.menu_state,
+            photo=page_data.get('photo')
         )
     
     async def show_from_callback(self, callback: CallbackQuery, **kwargs):
@@ -59,7 +61,8 @@ class BasePage(ABC):
             callback,
             page_data.get('text', ''),
             reply_markup=page_data.get('keyboard'),
-            menu_state=self.menu_state
+            menu_state=self.menu_state,
+            photo=page_data.get('photo')
         )
     
     def get_title(self, user_id: int) -> str:

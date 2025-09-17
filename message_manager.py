@@ -59,7 +59,8 @@ class MessageManager:
         parse_mode: str = 'HTML',
         menu_state: str = 'main',
         force_new: bool = False,
-        send_reply_keyboard: bool = True
+        send_reply_keyboard: bool = True,
+        photo: str = None
     ) -> Message:
         """
         Отправить новое сообщение или отредактировать существующее
@@ -86,13 +87,22 @@ class MessageManager:
             if send_reply_keyboard:
                 keyboard_markup = await self._get_reply_keyboard(user_id)
             
-            # Отправляем новое сообщение
-            message = await bot.send_message(
-                chat_id=user_id,
-                text=text,
-                reply_markup=reply_markup or keyboard_markup,
-                parse_mode=parse_mode
-            )
+            # Отправляем новое сообщение (с фото или без)
+            if photo:
+                message = await bot.send_photo(
+                    chat_id=user_id,
+                    photo=photo,
+                    caption=text,
+                    reply_markup=reply_markup or keyboard_markup,
+                    parse_mode=parse_mode
+                )
+            else:
+                message = await bot.send_message(
+                    chat_id=user_id,
+                    text=text,
+                    reply_markup=reply_markup or keyboard_markup,
+                    parse_mode=parse_mode
+                )
             self.set_user_message(user_id, message.message_id, menu_state)
             logger.debug(f"Отправлено новое сообщение {message.message_id} пользователю {user_id}")
             return message
@@ -123,12 +133,22 @@ class MessageManager:
             if send_reply_keyboard:
                 keyboard_markup = await self._get_reply_keyboard(user_id)
             
-            message = await bot.send_message(
-                chat_id=user_id,
-                text=text,
-                reply_markup=reply_markup or keyboard_markup,
-                parse_mode=parse_mode
-            )
+            # Отправляем сообщение с фото или без
+            if photo:
+                message = await bot.send_photo(
+                    chat_id=user_id,
+                    photo=photo,
+                    caption=text,
+                    reply_markup=reply_markup or keyboard_markup,
+                    parse_mode=parse_mode
+                )
+            else:
+                message = await bot.send_message(
+                    chat_id=user_id,
+                    text=text,
+                    reply_markup=reply_markup or keyboard_markup,
+                    parse_mode=parse_mode
+                )
             self.set_user_message(user_id, message.message_id, menu_state)
             logger.debug(f"Создано новое сообщение {message.message_id} после неудачного редактирования для пользователя {user_id}")
             return message
@@ -140,7 +160,8 @@ class MessageManager:
         reply_markup=None, 
         parse_mode: str = 'HTML',
         menu_state: str = 'main',
-        send_reply_keyboard: bool = True
+        send_reply_keyboard: bool = True,
+        photo: str = None
     ):
         """
         Обработать навигацию через callback с автоматическим редактированием
@@ -166,12 +187,22 @@ class MessageManager:
         if send_reply_keyboard:
             keyboard_markup = await self._get_reply_keyboard(user_id)
             
-        message = await callback.bot.send_message(
-            chat_id=user_id,
-            text=text,
-            reply_markup=reply_markup or keyboard_markup,
-            parse_mode=parse_mode
-        )
+        # Отправляем сообщение с фото или без
+        if photo:
+            message = await callback.bot.send_photo(
+                chat_id=user_id,
+                photo=photo,
+                caption=text,
+                reply_markup=reply_markup or keyboard_markup,
+                parse_mode=parse_mode
+            )
+        else:
+            message = await callback.bot.send_message(
+                chat_id=user_id,
+                text=text,
+                reply_markup=reply_markup or keyboard_markup,
+                parse_mode=parse_mode
+            )
         self.set_user_message(user_id, message.message_id, menu_state)
         logger.debug(f"Callback навигация: создано новое сообщение {message.message_id} с нижней клавиатурой")
     

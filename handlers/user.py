@@ -101,7 +101,7 @@ async def add_to_cart(callback: CallbackQuery):
     
     # Проверяем существование товара
     product = await db.get_product(product_id)
-    if not product or not product.in_stock:  # Если товара нет в наличии
+    if not product or not product.in_stock or product.stock_quantity <= 0:
         await callback.answer(_("common.error"), show_alert=True)
         return
     
@@ -114,6 +114,22 @@ async def add_to_cart(callback: CallbackQuery):
             username=callback.from_user.username,
             first_name=callback.from_user.first_name
         )
+    
+    # Проверяем текущее количество в корзине
+    cart_items = await db.get_cart(user_id)
+    current_quantity_in_cart = 0
+    for item in cart_items:
+        if item.product_id == product_id:
+            current_quantity_in_cart = item.quantity
+            break
+    
+    # Проверяем, не превышает ли добавление лимит склада
+    if current_quantity_in_cart >= product.stock_quantity:
+        await callback.answer(
+            _("error.max_quantity", user_id=callback.from_user.id, quantity=product.stock_quantity, current=current_quantity_in_cart), 
+            show_alert=True
+        )
+        return
     
     # Добавляем в корзину
     await db.add_to_cart(user_id, product_id, 1)
@@ -158,6 +174,12 @@ async def cart_increase(callback: CallbackQuery):
     logger.info(f"Увеличение количества товара {product_id} для пользователя {user_id}")
     logger.info(f"Текст сообщения: {callback.message.text[:100]}...")
     
+    # Проверяем товар и его количество на складе
+    product = await db.get_product(product_id)
+    if not product or not product.in_stock or product.stock_quantity <= 0:
+        await callback.answer(_("error.product_unavailable", user_id=callback.from_user.id), show_alert=True)
+        return
+    
     # Получаем текущее количество
     cart_items = await db.get_cart(user_id)
     current_quantity = 0
@@ -165,6 +187,14 @@ async def cart_increase(callback: CallbackQuery):
         if item.product_id == product_id:
             current_quantity = item.quantity
             break
+    
+    # Проверяем, не превышает ли увеличение лимит склада
+    if current_quantity >= product.stock_quantity:
+        await callback.answer(
+            _("error.max_quantity", user_id=callback.from_user.id, quantity=product.stock_quantity, current=0), 
+            show_alert=True
+        )
+        return
     
     new_quantity = current_quantity + 1
     await db.update_cart_quantity(user_id, product_id, new_quantity)
@@ -373,7 +403,7 @@ async def start_checkout(callback: CallbackQuery, state: FSMContext):
     
     if total < MIN_ORDER_AMOUNT:
         await callback.answer(
-            f"❌ Минимальная сумма заказа {MIN_ORDER_AMOUNT}₾",
+            _("error.min_order_amount", user_id=callback.from_user.id, amount=MIN_ORDER_AMOUNT),
             show_alert=True
         )
         return
@@ -841,7 +871,8 @@ async def change_language(callback: CallbackQuery):
     # Сопоставление кодов языков с ключами переводов
     language_mapping = {
         'ru': 'russian',
-        'en': 'english'
+        'en': 'english',
+        'ka': 'georgian'
     }
     
     # Получаем название языка из переводов

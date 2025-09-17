@@ -34,6 +34,7 @@ class Product(NamedTuple):
     category_id: int
     in_stock: bool
     created_at: datetime
+    stock_quantity: int
     
 
 class CartItem(NamedTuple):

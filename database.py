@@ -70,10 +70,10 @@ class Database:
         return await self.fetchall(query)
     
     async def get_categories_with_products(self):
-        """Получение только категорий, в которых есть товары"""
+        """Получение только категорий, в которых есть товары в наличии"""
         query = """SELECT DISTINCT c.* FROM categories c 
                    INNER JOIN products p ON c.id = p.category_id 
-                   WHERE p.in_stock = true 
+                   WHERE p.in_stock = true AND p.stock_quantity > 0
                    ORDER BY c.id"""
         return await self.fetchall(query)
     
@@ -90,11 +90,11 @@ class Database:
         return None
     
     # Методы для работы с товарами
-    async def add_product(self, name, price, description, photo=None, category_id=None):
+    async def add_product(self, name, price, description, photo=None, category_id=None, stock_quantity=1):
         """Добавление товара"""
-        query = """INSERT INTO products (name, price, description, photo, category_id) 
-                   VALUES ($1, $2, $3, $4, $5)"""
-        await self.execute(query, name, price, description, photo, category_id)
+        query = """INSERT INTO products (name, price, description, photo, category_id, stock_quantity) 
+                   VALUES ($1, $2, $3, $4, $5, $6)"""
+        await self.execute(query, name, price, description, photo, category_id, stock_quantity)
     
     async def get_products(self, category_id=None):
         """Получение списка товаров"""
@@ -114,9 +114,9 @@ class Database:
             return await self.fetchall(query)
     
     async def get_products_by_category(self, category_id):
-        """Получение товаров по категории"""
+        """Получение товаров по категории (только те, что в наличии)"""
         query = """SELECT * FROM products 
-                   WHERE category_id = $1 AND in_stock = true 
+                   WHERE category_id = $1 AND in_stock = true AND stock_quantity > 0
                    ORDER BY id"""
         rows = await self.fetchall(query, category_id)
         return [
@@ -128,7 +128,8 @@ class Database:
                 photo=row['photo'],
                 category_id=row['category_id'],
                 in_stock=row['in_stock'],
-                created_at=row['created_at']
+                created_at=row['created_at'],
+                stock_quantity=row['stock_quantity']
             ) for row in rows
         ]
     
@@ -145,7 +146,8 @@ class Database:
                 photo=row['photo'],
                 category_id=row['category_id'],
                 in_stock=row['in_stock'],
-                created_at=row['created_at']
+                created_at=row['created_at'],
+                stock_quantity=row['stock_quantity']
             ) for row in rows
         ]
     
@@ -162,7 +164,8 @@ class Database:
                 photo=row['photo'],
                 category_id=row['category_id'],
                 in_stock=row['in_stock'],
-                created_at=row['created_at']
+                created_at=row['created_at'],
+                stock_quantity=row['stock_quantity']
             )
         return None
     

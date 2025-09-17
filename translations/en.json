@@ -90,6 +90,15 @@
   
   "admin": {
     "panel": "🔧 <b>Admin Panel</b>",
+    "enhanced_panel": "🔧 <b>Enhanced Admin Panel</b>",
+    "order_statistics": "📊 <b>ORDER STATISTICS</b>",
+    "new_orders": "🆕 <b>New orders:</b>",
+    "checking_orders": "💰 <b>Checking:</b>",
+    "confirmed_orders": "✅ <b>Confirmed:</b>",
+    "shipping_orders": "🚚 <b>Shipping:</b>",
+    "total_products": "📦 <b>Total products:</b>",
+    "select_action": "⚡ <b>Select action:</b>",
+    "total_orders": "📊 Total orders:",
     "products": "📦 Product Management",
     "orders": "📋 New Orders",
     "all_orders": "📋 All Orders", 
@@ -110,6 +119,7 @@
     "select": "Select language:",
     "russian": "🇷🇺 Русский",
     "english": "🇺🇸 English",
+    "georgian": "🇬🇪 ქართული",
     "changed": "✅ Language changed to {language}"
   },
 
@@ -143,6 +153,14 @@
     "page": "Page",
     "prev_page": "Prev",
     "next_page": "Next"
+  },
+
+  "error": {
+    "max_quantity": "❌ Maximum quantity: {quantity} pcs. You already have {current} in cart",
+    "product_unavailable": "❌ Product unavailable",
+    "min_order_amount": "❌ Minimum order amount {amount}₾",
+    "user_creation_failed": "❌ Error: failed to create user. Try /start",
+    "order_creation_error": "❌ Error creating order. Please try again."
   },
 
   "welcome": {

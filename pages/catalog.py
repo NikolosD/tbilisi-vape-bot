@@ -42,7 +42,7 @@ class CatalogPage(BasePage):
         
         return {
             'text': text,
-            'keyboard': get_categories_keyboard(categories)
+            'keyboard': get_categories_keyboard(categories, user_id=user_id)
         }
     
     async def _render_category(self, user_id: int, category_id: int) -> Dict[str, Any]:
@@ -57,14 +57,14 @@ class CatalogPage(BasePage):
             text = f"📂 <b>{category.name}</b>\n\n{_('catalog.category_empty', user_id=user_id)}"
             return {
                 'text': text,
-                'keyboard': get_category_products_keyboard([], category_id)
+                'keyboard': get_category_products_keyboard([], category_id, user_id=user_id)
             }
         
         text = f"📂 <b>{category.name}</b>\n\n{_('catalog.select_product', user_id=user_id)}"
         
         return {
             'text': text,
-            'keyboard': get_category_products_keyboard(products, category_id)
+            'keyboard': get_category_products_keyboard(products, category_id, user_id=user_id)
         }
     
     async def _render_product(self, user_id: int, product_id: int) -> Dict[str, Any]:
@@ -80,12 +80,18 @@ class CatalogPage(BasePage):
         
         text += f"💰 <b>{_('product.price', user_id=user_id)}</b> {product.price}₾\n"
         
-        if product.in_stock:
-            text += f"📦 <b>{_('product.in_stock', user_id=user_id)}</b>"
+        if product.in_stock and product.stock_quantity > 0:
+            text += f"📦 <b>В наличии:</b> {product.stock_quantity} шт."
         else:
             text += f"❌ <b>{_('product.out_of_stock', user_id=user_id)}</b>"
         
-        return {
+        result = {
             'text': text,
             'keyboard': get_product_card_keyboard(product.id, in_cart=False, from_category=None)
         }
+        
+        # Добавляем фото если есть
+        if product.photo:
+            result['photo'] = product.photo
+            
+        return result

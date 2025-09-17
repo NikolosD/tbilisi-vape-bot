@@ -24,6 +24,7 @@ class AdminStates(StatesGroup):
     waiting_product_name = State()
     waiting_product_price = State()
     waiting_product_description = State()
+    waiting_product_quantity = State()
     waiting_product_photo = State()
     waiting_broadcast_message = State()
     waiting_category_name = State()
@@ -52,36 +53,36 @@ async def show_admin_panel(callback: CallbackQuery):
     
     try:
         await callback.message.edit_text(
-            f"🔧 <b>Улучшенная админ-панель</b> <i>({current_time})</i>\n\n"
+            f"{_('admin.enhanced_panel', user_id=callback.from_user.id)} <i>({current_time})</i>\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 <b>СТАТИСТИКА ЗАКАЗОВ</b>\n"
+            f"{_('admin.order_statistics', user_id=callback.from_user.id)}\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🆕 <b>Новые заказы:</b> <code>{len(new_orders):>8}</code>\n"
-            f"💰 <b>На проверке:</b> <code>{len(checking_orders):>10}</code>\n" 
-            f"✅ <b>Подтвержденные:</b> <code>{len(paid_orders):>6}</code>\n"
-            f"🚚 <b>В доставке:</b> <code>{len(shipping_orders):>9}</code>\n"
-            f"📦 <b>Всего товаров:</b> <code>{len(products):>7}</code>\n\n"
+            f"{_('admin.new_orders', user_id=callback.from_user.id)} <code>{len(new_orders):>8}</code>\n"
+            f"{_('admin.checking_orders', user_id=callback.from_user.id)} <code>{len(checking_orders):>10}</code>\n" 
+            f"{_('admin.confirmed_orders', user_id=callback.from_user.id)} <code>{len(paid_orders):>6}</code>\n"
+            f"{_('admin.shipping_orders', user_id=callback.from_user.id)} <code>{len(shipping_orders):>9}</code>\n"
+            f"{_('admin.total_products', user_id=callback.from_user.id)} <code>{len(products):>7}</code>\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡ <b>Выберите действие для работы:</b>",
-            reply_markup=get_enhanced_admin_keyboard(),
+            f"{_('admin.select_action', user_id=callback.from_user.id)}",
+            reply_markup=get_enhanced_admin_keyboard(user_id=callback.from_user.id),
             parse_mode='HTML'
         )
     except Exception:
         # Если не получилось отредактировать, отправляем новое сообщение
         await callback.message.delete()
         await callback.message.answer(
-            f"🔧 <b>Улучшенная админ-панель</b> <i>({current_time})</i>\n\n"
+            f"{_('admin.enhanced_panel', user_id=callback.from_user.id)} <i>({current_time})</i>\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 <b>СТАТИСТИКА ЗАКАЗОВ</b>\n"
+            f"{_('admin.order_statistics', user_id=callback.from_user.id)}\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🆕 <b>Новые заказы:</b> <code>{len(new_orders):>8}</code>\n"
-            f"💰 <b>На проверке:</b> <code>{len(checking_orders):>10}</code>\n" 
-            f"✅ <b>Подтвержденные:</b> <code>{len(paid_orders):>6}</code>\n"
-            f"🚚 <b>В доставке:</b> <code>{len(shipping_orders):>9}</code>\n"
-            f"📦 <b>Всего товаров:</b> <code>{len(products):>7}</code>\n\n"
+            f"{_('admin.new_orders', user_id=callback.from_user.id)} <code>{len(new_orders):>8}</code>\n"
+            f"{_('admin.checking_orders', user_id=callback.from_user.id)} <code>{len(checking_orders):>10}</code>\n" 
+            f"{_('admin.confirmed_orders', user_id=callback.from_user.id)} <code>{len(paid_orders):>6}</code>\n"
+            f"{_('admin.shipping_orders', user_id=callback.from_user.id)} <code>{len(shipping_orders):>9}</code>\n"
+            f"{_('admin.total_products', user_id=callback.from_user.id)} <code>{len(products):>7}</code>\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡ <b>Выберите действие для работы:</b>",
-            reply_markup=get_enhanced_admin_keyboard(),
+            f"{_('admin.select_action', user_id=callback.from_user.id)}",
+            reply_markup=get_enhanced_admin_keyboard(user_id=callback.from_user.id),
             parse_mode='HTML'
         )
 
@@ -141,6 +142,7 @@ async def edit_product_menu(callback: CallbackQuery):
         return
     
     keyboard = [
+        [InlineKeyboardButton(text="📦 Изменить количество", callback_data=f"edit_quantity_{product_id}")],
         [InlineKeyboardButton(text="🗑 Удалить товар", callback_data=f"delete_product_{product_id}")],
         [InlineKeyboardButton(text="📦 Скрыть/Показать", callback_data=f"toggle_stock_{product_id}")],
         [InlineKeyboardButton(text="🔙 Список товаров", callback_data="admin_edit_products")]
@@ -153,9 +155,34 @@ async def edit_product_menu(callback: CallbackQuery):
         f"📝 <b>Название:</b> {product.name}\n"
         f"💰 <b>Цена:</b> {product.price}₾\n"
         f"📋 <b>Описание:</b> {product.description or 'Нет описания'}\n"
-        f"📦 <b>Статус:</b> {stock_status}\n\n"
+        f"📦 <b>Количество:</b> {product.stock_quantity} шт.\n"
+        f"📊 <b>Статус:</b> {stock_status}\n\n"
         f"Выберите действие:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode='HTML'
+    )
+
+@router.callback_query(F.data.startswith("edit_quantity_"), admin_filter)
+async def edit_product_quantity(callback: CallbackQuery, state: FSMContext):
+    """Изменить количество товара"""
+    product_id = int(callback.data.split("_")[2])
+    product = await db.get_product(product_id)
+    
+    if not product:
+        await callback.answer(_("common.not_found", user_id=callback.from_user.id), show_alert=True)
+        return
+    
+    await state.set_state("waiting_quantity_input")
+    await state.update_data(product_id=product_id)
+    
+    await callback.message.edit_text(
+        f"📦 <b>Изменение количества</b>\n\n"
+        f"📝 <b>Товар:</b> {product.name}\n"
+        f"📊 <b>Текущее количество:</b> {product.stock_quantity} шт.\n\n"
+        f"Введите новое количество (0-999):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data=f"edit_product_{product_id}")]
+        ]),
         parse_mode='HTML'
     )
 
@@ -313,6 +340,37 @@ async def process_product_description(message: Message, state: FSMContext):
         f"📝 <b>Название:</b> {data['name']}\n"
         f"💰 <b>Цена:</b> {data['price']}₾\n"
         f"📋 <b>Описание:</b> {description}\n\n"
+        f"📦 <b>Введите количество товара (1-999):</b>",
+        parse_mode='HTML'
+    )
+    await state.set_state(AdminStates.waiting_product_quantity)
+
+@router.message(AdminStates.waiting_product_quantity, admin_filter)
+async def process_product_quantity(message: Message, state: FSMContext):
+    """Обработка количества товара"""
+    try:
+        quantity = int(message.text.strip())
+        if quantity < 1 or quantity > 999:
+            await message.answer(
+                "❌ Количество должно быть от 1 до 999\n\n📦 Введите количество товара:",
+                parse_mode='HTML'
+            )
+            return
+    except ValueError:
+        await message.answer(
+            "❌ Введите число от 1 до 999\n\n📦 Введите количество товара:",
+            parse_mode='HTML'
+        )
+        return
+    
+    data = await state.get_data()
+    await state.update_data(stock_quantity=quantity)
+    
+    await message.answer(
+        f"📝 <b>Название:</b> {data['name']}\n"
+        f"💰 <b>Цена:</b> {data['price']}₾\n"
+        f"📋 <b>Описание:</b> {data['description']}\n"
+        f"📦 <b>Количество:</b> {quantity} шт.\n\n"
         f"Теперь пришлите фото товара (или напишите 'пропустить' без фото):",
         parse_mode='HTML'
     )
@@ -330,7 +388,8 @@ async def process_product_photo(message: Message, state: FSMContext):
         price=data['price'],
         description=data['description'],
         photo=photo_file_id,
-        category_id=data.get('category_id')
+        category_id=data.get('category_id'),
+        stock_quantity=data.get('stock_quantity', 1)
     )
     
     await message.answer(
@@ -338,7 +397,13 @@ async def process_product_photo(message: Message, state: FSMContext):
         f"📝 <b>Название:</b> {data['name']}\n"
         f"💰 <b>Цена:</b> {data['price']}₾\n"
         f"📋 <b>Описание:</b> {data['description']}\n"
+        f"📦 <b>Количество:</b> {data.get('stock_quantity', 1)} шт.\n"
         f"📸 <b>Фото:</b> Добавлено",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Добавить еще товар", callback_data="admin_add_product")],
+            [InlineKeyboardButton(text="📦 Управление товарами", callback_data="admin_products")],
+            [InlineKeyboardButton(text="🏠 Админ панель", callback_data="admin_panel")]
+        ]),
         parse_mode='HTML'
     )
     
@@ -355,7 +420,8 @@ async def process_product_no_photo(message: Message, state: FSMContext):
         price=data['price'],
         description=data['description'],
         photo=None,
-        category_id=data.get('category_id')
+        category_id=data.get('category_id'),
+        stock_quantity=data.get('stock_quantity', 1)
     )
     
     await message.answer(
@@ -363,7 +429,13 @@ async def process_product_no_photo(message: Message, state: FSMContext):
         f"📝 <b>Название:</b> {data['name']}\n"
         f"💰 <b>Цена:</b> {data['price']}₾\n"
         f"📋 <b>Описание:</b> {data['description']}\n"
+        f"📦 <b>Количество:</b> {data.get('stock_quantity', 1)} шт.\n"
         f"📸 <b>Фото:</b> Не добавлено",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Добавить еще товар", callback_data="admin_add_product")],
+            [InlineKeyboardButton(text="📦 Управление товарами", callback_data="admin_products")],
+            [InlineKeyboardButton(text="🏠 Админ панель", callback_data="admin_panel")]
+        ]),
         parse_mode='HTML'
     )
     
@@ -428,7 +500,7 @@ async def admin_all_orders_page(callback: CallbackQuery, page: int):
     
     text = f"📋 <b>Все заказы</b>\n\n"
     text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    text += f"📊 Всего заказов: <b>{len(orders)}</b>\n"
+    text += f"{_('admin.total_orders', user_id=callback.from_user.id)} <b>{len(orders)}</b>\n"
     text += pagination.get_page_info_text(pagination_info, user_id=callback.from_user.id)
     text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     
@@ -480,9 +552,78 @@ async def process_admin_message(message: Message, state: FSMContext):
     
     if current_state == "waiting_order_search":
         await process_order_search(message, state)
+    elif current_state == "waiting_quantity_input":
+        await process_quantity_input(message, state)
     else:
         # Если не в состоянии поиска, удаляем сообщение
         await message.delete()
+
+async def process_quantity_input(message: Message, state: FSMContext):
+    """Обработка ввода количества товара"""
+    try:
+        await message.delete()
+        
+        quantity_text = message.text.strip()
+        
+        # Проверяем, что введено число
+        if not quantity_text.isdigit():
+            await message.bot.send_message(
+                chat_id=message.chat.id,
+                text="❌ Количество должно быть числом от 0 до 999\n\nВведите правильное количество:",
+                parse_mode='HTML'
+            )
+            return
+        
+        quantity = int(quantity_text)
+        if quantity < 0 or quantity > 999:
+            await message.bot.send_message(
+                chat_id=message.chat.id,
+                text="❌ Количество должно быть от 0 до 999\n\nВведите правильное количество:",
+                parse_mode='HTML'
+            )
+            return
+        
+        # Получаем product_id из состояния
+        data = await state.get_data()
+        product_id = data.get('product_id')
+        
+        if not product_id:
+            await state.clear()
+            await message.bot.send_message(
+                chat_id=message.chat.id,
+                text="❌ Ошибка: товар не найден",
+                parse_mode='HTML'
+            )
+            return
+        
+        # Обновляем количество в базе данных
+        await db.execute("UPDATE products SET stock_quantity = $1 WHERE id = $2", quantity, product_id)
+        
+        # Получаем обновленную информацию о товаре
+        product = await db.get_product(product_id)
+        
+        await state.clear()
+        
+        # Отправляем подтверждение и возвращаемся к редактированию товара
+        await message.bot.send_message(
+            chat_id=message.chat.id,
+            text=f"✅ Количество товара обновлено!\n\n"
+                 f"📝 <b>Товар:</b> {product.name}\n"
+                 f"📦 <b>Новое количество:</b> {quantity} шт.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 К товару", callback_data=f"edit_product_{product_id}")],
+                [InlineKeyboardButton(text="📋 Список товаров", callback_data="admin_edit_products")]
+            ]),
+            parse_mode='HTML'
+        )
+        
+    except Exception as e:
+        await state.clear()
+        await message.bot.send_message(
+            chat_id=message.chat.id,
+            text=f"❌ Ошибка при обновлении количества: {str(e)}",
+            parse_mode='HTML'
+        )
 
 async def process_order_search(message: Message, state: FSMContext):
     """Обработка поиска заказа по номеру"""
@@ -1036,7 +1177,7 @@ async def change_order_status_menu(callback: CallbackQuery):
     
     await callback.message.edit_text(
         f"🔄 <b>Изменить статус заказа #{order_id}</b>\n\nВыберите новый статус:",
-        reply_markup=get_change_status_keyboard(order_id),
+        reply_markup=get_change_status_keyboard(order_id, user_id=callback.from_user.id),
         parse_mode="HTML"
     )
 
@@ -1435,7 +1576,7 @@ async def show_filtered_orders_page(callback: CallbackQuery, filter_type: str, p
     
     text = f"{title}\n\n"
     text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    text += f"📊 Всего заказов: <b>{len(orders)}</b>\n"
+    text += f"{_('admin.total_orders', user_id=callback.from_user.id)} <b>{len(orders)}</b>\n"
     text += pagination.get_page_info_text(pagination_info, user_id=callback.from_user.id)
     text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     
