@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, Contact
+from aiogram.types import Message, CallbackQuery, Contact, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import json
@@ -302,12 +302,15 @@ async def cart_increase(callback: CallbackQuery):
     product_id = int(callback.data.split("_")[2])
     user_id = callback.from_user.id
     
+    logger.info(f"Увеличение количества товара {product_id} для пользователя {user_id}")
+    logger.info(f"Текст сообщения: {callback.message.text[:100]}...")
+    
     # Получаем текущее количество
     cart_items = await db.get_cart(user_id)
     current_quantity = 0
     for item in cart_items:
-        if item[0] == product_id:
-            current_quantity = item[1]
+        if item.product_id == product_id:
+            current_quantity = item.quantity
             break
     
     new_quantity = current_quantity + 1
@@ -315,9 +318,9 @@ async def cart_increase(callback: CallbackQuery):
     
     await callback.answer(_("cart.quantity_increased", quantity=new_quantity))
     
-    # Обновляем корзину если мы на странице корзины
-    if "cart" in callback.message.text:
-        await update_cart_display(callback)
+    # Всегда обновляем корзину когда нажимают на кнопки управления корзиной
+    logger.info("Обновляем отображение корзины...")
+    await update_cart_display(callback)
 
 @router.callback_query(F.data.startswith("cart_decrease_"))
 async def cart_decrease(callback: CallbackQuery):
@@ -325,12 +328,14 @@ async def cart_decrease(callback: CallbackQuery):
     product_id = int(callback.data.split("_")[2])
     user_id = callback.from_user.id
     
+    logger.info(f"Уменьшение количества товара {product_id} для пользователя {user_id}")
+    
     # Получаем текущее количество
     cart_items = await db.get_cart(user_id)
     current_quantity = 0
     for item in cart_items:
-        if item[0] == product_id:
-            current_quantity = item[1]
+        if item.product_id == product_id:
+            current_quantity = item.quantity
             break
     
     if current_quantity <= 1:
@@ -341,15 +346,17 @@ async def cart_decrease(callback: CallbackQuery):
         await db.update_cart_quantity(user_id, product_id, new_quantity)
         await callback.answer(_("cart.quantity_decreased", quantity=new_quantity))
     
-    # Обновляем корзину если мы на странице корзины
-    if "cart" in callback.message.text:
-        await update_cart_display(callback)
+    # Всегда обновляем корзину когда нажимают на кнопки управления корзиной
+    logger.info("Обновляем отображение корзины...")
+    await update_cart_display(callback)
 
 @router.callback_query(F.data.startswith("cart_remove_"))
 async def cart_remove(callback: CallbackQuery):
     """Удалить товар из корзины"""
     product_id = int(callback.data.split("_")[2])
     user_id = callback.from_user.id
+    
+    logger.info(f"Удаление товара {product_id} из корзины пользователя {user_id}")
     
     product = await db.get_product(product_id)
     await db.remove_from_cart(user_id, product_id)
@@ -358,6 +365,7 @@ async def cart_remove(callback: CallbackQuery):
     
     # Обновляем корзину если мы на странице корзины
     if "cart" in callback.message.text:
+        logger.info("Обновляем отображение корзины...")
         await update_cart_display(callback)
     else:
         # Получаем from_category из исходного callback_data если есть
@@ -378,26 +386,37 @@ async def update_cart_display(callback: CallbackQuery):
     user_id = callback.from_user.id
     cart_items = await db.get_cart(user_id)
     
+    # Удаляем старое сообщение
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    
     if not cart_items:
-        await callback.message.edit_text(
-            "🛒 <b>Ваша корзина пуста</b>\n\nДобавьте товары из каталога!",
-            parse_mode='HTML'
+        await callback.bot.send_message(
+            chat_id=user_id,
+            text="🛒 <b>Ваша корзина пуста</b>\n\nДобавьте товары из каталога!",
+            parse_mode='HTML',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=_("common.main_menu"), callback_data="back_to_menu")]
+            ])
         )
         return
     
-    total = sum(item[1] * item[3] for item in cart_items)
+    total = sum(item.quantity * item.price for item in cart_items)
     
     cart_text = "🛒 <b>Ваша корзина:</b>\n\n"
     for item in cart_items:
-        product_id, quantity, name, price, photo = item
-        cart_text += f"• {name}\n"
-        cart_text += f"  Количество: {quantity} шт.\n"
-        cart_text += f"  Цена: {price}₾ × {quantity} = {price * quantity}₾\n\n"
+        cart_text += f"• {item.name}\n"
+        cart_text += f"  Количество: {item.quantity} шт.\n"
+        cart_text += f"  Цена: {item.price}₾ × {item.quantity} = {item.price * item.quantity}₾\n\n"
     
     cart_text += _("cart.total", total=total)
     
-    await callback.message.edit_text(
-        cart_text,
+    # Отправляем новое сообщение
+    await callback.bot.send_message(
+        chat_id=user_id,
+        text=cart_text,
         reply_markup=get_cart_keyboard(cart_items),
         parse_mode='HTML'
     )

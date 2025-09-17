@@ -127,16 +127,12 @@ def get_cart_keyboard(cart_items):
     keyboard = []
     
     for item in cart_items:
-        product_id = item[0]
-        quantity = item[1]
-        name = item[2]
         keyboard.append([
-            InlineKeyboardButton(text=f"➖", callback_data=f"cart_decrease_{product_id}"),
-            InlineKeyboardButton(text=f"{name} ({quantity})", callback_data=f"product_{product_id}"),
-            InlineKeyboardButton(text=f"➕", callback_data=f"cart_increase_{product_id}")
+            InlineKeyboardButton(text=f"{item.name} ({item.quantity})", callback_data=f"product_{item.product_id}")
         ])
         keyboard.append([
-            InlineKeyboardButton(text=_("common.remove"), callback_data=f"cart_remove_{product_id}")
+            InlineKeyboardButton(text="➖", callback_data=f"cart_decrease_{item.product_id}"),
+            InlineKeyboardButton(text="➕", callback_data=f"cart_increase_{item.product_id}")
         ])
     
     if cart_items:
