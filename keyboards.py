@@ -251,15 +251,50 @@ def get_contact_keyboard():
     return keyboard
 
 # Админ панель
-def get_admin_keyboard():
+def get_admin_keyboard(user_id=None):
+    from config import SUPER_ADMIN_ID
+    
     keyboard = [
         [InlineKeyboardButton(text=_("admin.products"), callback_data="admin_products")],
-        [InlineKeyboardButton(text=_("admin.orders"), callback_data="admin_orders")],
         [InlineKeyboardButton(text=_("admin.all_orders"), callback_data="admin_all_orders")],
         [InlineKeyboardButton(text=_("admin.stats"), callback_data="admin_stats")],
-        [InlineKeyboardButton(text=_("admin.broadcast"), callback_data="admin_broadcast")],
-        [InlineKeyboardButton(text=_("common.main_menu"), callback_data="back_to_menu")]
+        [InlineKeyboardButton(text=_("admin.broadcast"), callback_data="admin_broadcast")]
     ]
+    
+    # Добавляем кнопку управления админами только для супер-админа
+    if user_id == SUPER_ADMIN_ID:
+        keyboard.append([InlineKeyboardButton(text=_("admin.manage_admins"), callback_data="manage_admins")])
+    
+    keyboard.append([InlineKeyboardButton(text=_("common.main_menu"), callback_data="back_to_menu")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+# Управление администраторами (для супер-админа)
+def get_admin_management_keyboard():
+    keyboard = [
+        [InlineKeyboardButton(text=_("admin.add_admin"), callback_data="add_admin")],
+        [InlineKeyboardButton(text=_("admin.remove_admin"), callback_data="remove_admin")],
+        [InlineKeyboardButton(text=_("admin.list_admins"), callback_data="list_admins")],
+        [InlineKeyboardButton(text=_("common.back"), callback_data="admin_panel")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+# Клавиатура со списком админов для удаления
+def get_admins_list_keyboard(admins, action="remove"):
+    keyboard = []
+    for admin in admins:
+        user_id = admin['user_id'] if isinstance(admin, dict) else admin[0]
+        username = admin.get('username', 'Нет username') if isinstance(admin, dict) else admin[1] or 'Нет username'
+        first_name = admin.get('first_name', 'Нет имени') if isinstance(admin, dict) else admin[2] or 'Нет имени'
+        
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"❌ {first_name} (@{username})",
+                callback_data=f"{action}_admin_{user_id}"
+            )
+        ])
+    
+    keyboard.append([InlineKeyboardButton(text=_("common.back"), callback_data="manage_admins")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # Управление товарами (админ)
@@ -323,7 +358,7 @@ def get_admin_orders_keyboard(orders):
             )
         ])
     
-    keyboard.append([InlineKeyboardButton(text=_("common.to_admin"), callback_data="admin_panel")])
+    keyboard.append([InlineKeyboardButton(text=_("common.back"), callback_data="admin_panel")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # Действия с заказом (админ)
@@ -348,10 +383,7 @@ def get_admin_order_actions_keyboard(order_id, status, from_all_orders=False):
         keyboard.append([InlineKeyboardButton(text=_("admin_actions.change_status"), callback_data=f"admin_change_status_{order_id}")])
     
     # Кнопка возврата
-    if from_all_orders:
-        keyboard.append([InlineKeyboardButton(text=_("common.to_all_orders"), callback_data="admin_all_orders")])
-    else:
-        keyboard.append([InlineKeyboardButton(text=_("common.to_orders_admin"), callback_data="admin_orders")])
+    keyboard.append([InlineKeyboardButton(text=_("common.to_admin"), callback_data="admin_panel")])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -416,6 +448,8 @@ def get_payment_notification_keyboard(order_id, user_id=None):
 
 # Улучшенная админ-панель с фильтрами заказов
 def get_enhanced_admin_keyboard(user_id=None):
+    from config import SUPER_ADMIN_ID
+    
     keyboard = [
         [
             InlineKeyboardButton(text=f"🆕 {_('admin.orders', user_id=user_id)}", callback_data="admin_orders_new"),
@@ -432,9 +466,15 @@ def get_enhanced_admin_keyboard(user_id=None):
         [InlineKeyboardButton(text=_("admin.all_orders", user_id=user_id), callback_data="admin_all_orders")],
         [InlineKeyboardButton(text=_("admin.products", user_id=user_id), callback_data="admin_products")],
         [InlineKeyboardButton(text=_("admin.stats", user_id=user_id), callback_data="admin_stats")],
-        [InlineKeyboardButton(text=_("admin.broadcast", user_id=user_id), callback_data="admin_broadcast")],
-        [InlineKeyboardButton(text=_("common.main_menu", user_id=user_id), callback_data="back_to_menu")]
+        [InlineKeyboardButton(text=_("admin.broadcast", user_id=user_id), callback_data="admin_broadcast")]
     ]
+    
+    # Добавляем кнопку управления админами только для супер-админа
+    if user_id == SUPER_ADMIN_ID:
+        keyboard.append([InlineKeyboardButton(text=_("admin.manage_admins", user_id=user_id), callback_data="manage_admins")])
+    
+    keyboard.append([InlineKeyboardButton(text=_("common.main_menu", user_id=user_id), callback_data="back_to_menu")])
+    
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # Фильтр заказов по статусу

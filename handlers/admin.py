@@ -6,12 +6,13 @@ import json
 import time
 
 from database import db
-from config import ADMIN_IDS, DELIVERY_ZONES
+from config import ADMIN_IDS, DELIVERY_ZONES, SUPER_ADMIN_ID
 from keyboards import (
     get_admin_keyboard, get_enhanced_admin_keyboard, get_admin_products_keyboard, 
     get_admin_orders_keyboard, get_admin_order_actions_keyboard,
     get_admin_categories_keyboard, get_category_selection_keyboard,
-    get_change_status_keyboard
+    get_change_status_keyboard, get_admin_management_keyboard,
+    get_admins_list_keyboard
 )
 import i18n
 from i18n import _
@@ -30,12 +31,19 @@ class AdminStates(StatesGroup):
     waiting_category_name = State()
     waiting_category_emoji = State()
     waiting_category_description = State()
+    waiting_admin_id = State()
 
-# Фильтр для админов
+# Фильтр для админов (синхронная версия для совместимости)
 def admin_filter(message_or_callback):
     """Проверка прав администратора"""
     user_id = message_or_callback.from_user.id
-    return user_id in ADMIN_IDS
+    # Проверяем в конфиге или в БД (пока только конфиг)
+    return user_id in ADMIN_IDS or user_id == SUPER_ADMIN_ID
+
+# Асинхронная проверка админа (для использования внутри хендлеров)
+async def is_admin(user_id: int) -> bool:
+    """Проверка прав администратора с учетом БД"""
+    return user_id in ADMIN_IDS or user_id == SUPER_ADMIN_ID or await db.is_admin_in_db(user_id)
 
 # Админ панель
 @router.callback_query(F.data == "admin_panel", admin_filter)
@@ -51,38 +59,40 @@ async def show_admin_panel(callback: CallbackQuery):
     import datetime
     current_time = datetime.datetime.now().strftime("%H:%M")
     
+    user_id = callback.from_user.id
+    
     try:
         await callback.message.edit_text(
-            f"{_('admin.enhanced_panel', user_id=callback.from_user.id)} <i>({current_time})</i>\n\n"
+            f"{_('admin.enhanced_panel', user_id=user_id)} <i>({current_time})</i>\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{_('admin.order_statistics', user_id=callback.from_user.id)}\n"
+            f"{_('admin.order_statistics', user_id=user_id)}\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"{_('admin.new_orders', user_id=callback.from_user.id)} <code>{len(new_orders):>8}</code>\n"
-            f"{_('admin.checking_orders', user_id=callback.from_user.id)} <code>{len(checking_orders):>10}</code>\n" 
-            f"{_('admin.confirmed_orders', user_id=callback.from_user.id)} <code>{len(paid_orders):>6}</code>\n"
-            f"{_('admin.shipping_orders', user_id=callback.from_user.id)} <code>{len(shipping_orders):>9}</code>\n"
-            f"{_('admin.total_products', user_id=callback.from_user.id)} <code>{len(products):>7}</code>\n\n"
+            f"{_('admin.new_orders', user_id=user_id)} <code>{len(new_orders):>8}</code>\n"
+            f"{_('admin.checking_orders', user_id=user_id)} <code>{len(checking_orders):>10}</code>\n" 
+            f"{_('admin.confirmed_orders', user_id=user_id)} <code>{len(paid_orders):>6}</code>\n"
+            f"{_('admin.shipping_orders', user_id=user_id)} <code>{len(shipping_orders):>9}</code>\n"
+            f"{_('admin.total_products', user_id=user_id)} <code>{len(products):>7}</code>\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{_('admin.select_action', user_id=callback.from_user.id)}",
-            reply_markup=get_enhanced_admin_keyboard(user_id=callback.from_user.id),
+            f"{_('admin.select_action', user_id=user_id)}",
+            reply_markup=get_enhanced_admin_keyboard(user_id=user_id),
             parse_mode='HTML'
         )
     except Exception:
         # Если не получилось отредактировать, отправляем новое сообщение
         await callback.message.delete()
         await callback.message.answer(
-            f"{_('admin.enhanced_panel', user_id=callback.from_user.id)} <i>({current_time})</i>\n\n"
+            f"{_('admin.enhanced_panel', user_id=user_id)} <i>({current_time})</i>\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{_('admin.order_statistics', user_id=callback.from_user.id)}\n"
+            f"{_('admin.order_statistics', user_id=user_id)}\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"{_('admin.new_orders', user_id=callback.from_user.id)} <code>{len(new_orders):>8}</code>\n"
-            f"{_('admin.checking_orders', user_id=callback.from_user.id)} <code>{len(checking_orders):>10}</code>\n" 
-            f"{_('admin.confirmed_orders', user_id=callback.from_user.id)} <code>{len(paid_orders):>6}</code>\n"
-            f"{_('admin.shipping_orders', user_id=callback.from_user.id)} <code>{len(shipping_orders):>9}</code>\n"
-            f"{_('admin.total_products', user_id=callback.from_user.id)} <code>{len(products):>7}</code>\n\n"
+            f"{_('admin.new_orders', user_id=user_id)} <code>{len(new_orders):>8}</code>\n"
+            f"{_('admin.checking_orders', user_id=user_id)} <code>{len(checking_orders):>10}</code>\n" 
+            f"{_('admin.confirmed_orders', user_id=user_id)} <code>{len(paid_orders):>6}</code>\n"
+            f"{_('admin.shipping_orders', user_id=user_id)} <code>{len(shipping_orders):>9}</code>\n"
+            f"{_('admin.total_products', user_id=user_id)} <code>{len(products):>7}</code>\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{_('admin.select_action', user_id=callback.from_user.id)}",
-            reply_markup=get_enhanced_admin_keyboard(user_id=callback.from_user.id),
+            f"{_('admin.select_action', user_id=user_id)}",
+            reply_markup=get_enhanced_admin_keyboard(user_id=user_id),
             parse_mode='HTML'
         )
 
@@ -554,6 +564,9 @@ async def process_admin_message(message: Message, state: FSMContext):
         await process_order_search(message, state)
     elif current_state == "waiting_quantity_input":
         await process_quantity_input(message, state)
+    elif current_state in ["AdminManagementStates:waiting_admin_id", "AdminStates:waiting_admin_id"]:
+        # Пропускаем - обрабатывается в admin_management.py
+        return
     else:
         # Если не в состоянии поиска, удаляем сообщение
         await message.delete()
@@ -717,37 +730,6 @@ async def process_order_search(message: Message, state: FSMContext):
             parse_mode='HTML'
         )
 
-@router.callback_query(F.data == "admin_orders", admin_filter)
-async def admin_orders_menu(callback: CallbackQuery):
-    """Меню заказов для админа"""
-    orders = await db.get_pending_orders()
-    
-    if not orders:
-        await callback.message.edit_text(
-            "📋 <b>Новые заказы</b>\n\n"
-            "Новых заказов нет.",
-            reply_markup=get_admin_keyboard(),
-            parse_mode='HTML'
-        )
-        return
-    
-    text = f"📋 <b>Заказы требующие внимания</b>\n\nВсего: {len(orders)} заказов\n\nВыберите заказ:"
-    
-    try:
-        await callback.message.edit_text(
-            text,
-            reply_markup=get_admin_orders_keyboard(orders),
-            parse_mode='HTML'
-        )
-    except Exception:
-        # Если не удалось отредактировать (например, это было сообщение с фото), 
-        # удаляем старое и отправляем новое
-        await callback.message.delete()
-        await callback.message.answer(
-            text,
-            reply_markup=get_admin_orders_keyboard(orders),
-            parse_mode='HTML'
-        )
 
 @router.callback_query(F.data.startswith("admin_order_"), admin_filter)
 async def show_admin_order(callback: CallbackQuery):

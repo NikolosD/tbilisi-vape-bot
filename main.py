@@ -14,6 +14,7 @@ from database import db, init_db
 from keyboards import get_main_menu
 from handlers.user import router as user_router
 from handlers.admin import router as admin_router
+from admin_management import router as admin_management_router
 from i18n import _
 from middleware import AntiSpamMiddleware
 from anti_spam import anti_spam
@@ -36,6 +37,7 @@ dp.callback_query.middleware(AntiSpamMiddleware())
 
 # Подключение роутеров
 dp.include_router(user_router)
+dp.include_router(admin_management_router)  # Важно: подключаем ДО admin_router
 dp.include_router(admin_router)
 
 @dp.message(CommandStart())
@@ -91,7 +93,7 @@ async def cmd_admin(message: Message):
     from keyboards import get_enhanced_admin_keyboard
     await message.answer(
         "🔧 <b>Улучшенная админ-панель</b>\n\nВыберите действие:",
-        reply_markup=get_enhanced_admin_keyboard(),
+        reply_markup=get_enhanced_admin_keyboard(user_id=user_id),
         parse_mode='HTML'
     )
 
@@ -116,7 +118,7 @@ async def admin_panel_button(message: Message):
     from keyboards import get_enhanced_admin_keyboard
     await message.answer(
         "🔧 <b>Улучшенная админ-панель</b>\n\nВыберите действие:",
-        reply_markup=get_enhanced_admin_keyboard(),
+        reply_markup=get_enhanced_admin_keyboard(user_id=user_id),
         parse_mode='HTML'
     )
 
@@ -177,6 +179,15 @@ async def main():
         logger.info("🔥 Запуск Tbilisi VAPE Shop Bot...")
         logger.info("Инициализация базы данных...")
         await init_db()
+        
+        # Синхронизируем админов из БД
+        logger.info("Синхронизация администраторов...")
+        db_admins = await db.get_all_admins()
+        for admin in db_admins:
+            admin_id = admin[0]
+            if admin_id not in ADMIN_IDS:
+                ADMIN_IDS.append(admin_id)
+                logger.info(f"Добавлен админ из БД: {admin_id}")
         
         # Удаляем webhook перед началом работы
         logger.info("Очистка webhook...")

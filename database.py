@@ -335,6 +335,32 @@ class Database:
     async def get_cancelled_orders(self, limit=50):
         """Получение отмененных заказов"""
         return await self.get_orders_by_status('cancelled', limit)
+    
+    # Методы для работы с администраторами
+    async def add_admin(self, user_id, username, first_name, added_by):
+        """Добавить администратора"""
+        query = """INSERT INTO admins (user_id, username, first_name, added_by) 
+                   VALUES ($1, $2, $3, $4) 
+                   ON CONFLICT (user_id) DO UPDATE 
+                   SET username = $2, first_name = $3"""
+        await self.execute(query, user_id, username, first_name, added_by)
+    
+    async def remove_admin(self, user_id):
+        """Удалить администратора"""
+        query = "DELETE FROM admins WHERE user_id = $1"
+        await self.execute(query, user_id)
+    
+    async def get_all_admins(self):
+        """Получить список всех администраторов из БД"""
+        query = "SELECT * FROM admins ORDER BY added_at DESC"
+        rows = await self.fetchall(query)
+        return rows
+    
+    async def is_admin_in_db(self, user_id):
+        """Проверить, является ли пользователь администратором в БД"""
+        query = "SELECT user_id FROM admins WHERE user_id = $1"
+        result = await self.fetchone(query, user_id)
+        return result is not None
 
 
 async def init_db():
@@ -403,6 +429,15 @@ async def init_db():
         PRIMARY KEY (user_id, product_id),
         FOREIGN KEY (user_id) REFERENCES users (user_id),
         FOREIGN KEY (product_id) REFERENCES products (id)
+    )''')
+    
+    # Таблица администраторов
+    await conn.execute('''CREATE TABLE IF NOT EXISTS admins (
+        user_id BIGINT PRIMARY KEY,
+        username TEXT,
+        first_name TEXT,
+        added_by BIGINT,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
     
     await conn.close()

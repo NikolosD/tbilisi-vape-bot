@@ -6,6 +6,9 @@ BOT_TOKEN = os.getenv("TOKEN", "8131799075:AAEqxNvL7MNxlBtO79JBDfwAu8HB9CLz-JY")
 # ID администраторов
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "617646449").split(",")]
 
+# ID супер-администратора (может добавлять/удалять других админов)
+SUPER_ADMIN_ID = 617646449
+
 # База данных
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://tbilisi_vape_db_user:p6BLS96UYDyQdyuFuN0KsDF5oqSWkg5x@dpg-d34n7s2li9vc7395q6d0-a.oregon-postgres.render.com/tbilisi_vape_db")
 
