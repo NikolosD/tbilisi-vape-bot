@@ -25,8 +25,7 @@ def get_main_menu(is_admin=False, user_id=None):
     
     keyboard = ReplyKeyboardMarkup(
         keyboard=keyboard_rows,
-        resize_keyboard=True,
-        persistent=True
+        resize_keyboard=True
     )
     return keyboard
 
@@ -122,7 +121,7 @@ def get_product_card_keyboard(product_id, in_cart=False, from_category=None):
         keyboard = [
             [
                 InlineKeyboardButton(text="➖", callback_data=f"cart_decrease_{product_id}"),
-                InlineKeyboardButton(text="🔢 Ввести кол-во", callback_data=f"set_quantity_{product_id}"),
+                InlineKeyboardButton(text="🔢", callback_data=f"cart_input_qty_{product_id}"),
                 InlineKeyboardButton(text="➕", callback_data=f"cart_increase_{product_id}")
             ],
             [InlineKeyboardButton(text=_("product.remove_from_cart"), callback_data=f"cart_remove_{product_id}")],

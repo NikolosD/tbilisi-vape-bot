@@ -40,20 +40,25 @@ class Database:
             return await conn.fetch(query, *params)
     
     # Методы для работы с пользователями
-    async def add_user(self, user_id, username=None, first_name=None):
+    async def add_user(self, user_id, username=None, first_name=None, language_code='ru'):
         """Добавление пользователя"""
-        query = """INSERT INTO users (user_id, username, first_name) 
-                   VALUES ($1, $2, $3) ON CONFLICT (user_id) DO NOTHING"""
-        await self.execute(query, user_id, username, first_name)
+        query = """INSERT INTO users (user_id, username, first_name, language_code) 
+                   VALUES ($1, $2, $3, $4) ON CONFLICT (user_id) DO NOTHING"""
+        await self.execute(query, user_id, username, first_name, language_code)
     
     async def update_user_contact(self, user_id, phone, address):
         """Обновление контактных данных пользователя"""
         query = "UPDATE users SET phone = $1, address = $2 WHERE user_id = $3"
         await self.execute(query, phone, address, user_id)
     
+    async def update_user_language(self, user_id, language_code):
+        """Обновление языка пользователя"""
+        query = "UPDATE users SET language_code = $1 WHERE user_id = $2"
+        await self.execute(query, language_code, user_id)
+    
     async def get_user(self, user_id) -> Optional[User]:
         """Получение информации о пользователе"""
-        query = "SELECT user_id, username, first_name, phone, address, created_at FROM users WHERE user_id = $1"
+        query = "SELECT user_id, username, first_name, phone, address, language_code, created_at FROM users WHERE user_id = $1"
         row = await self.fetchone(query, user_id)
         return User(*row) if row else None
     
@@ -402,8 +407,15 @@ async def init_db():
         first_name TEXT,
         phone TEXT,
         address TEXT,
+        language_code TEXT DEFAULT 'ru',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
+    
+    # Добавляем колонку language_code если её нет
+    try:
+        await conn.execute('ALTER TABLE users ADD COLUMN language_code TEXT DEFAULT \'ru\'')
+    except asyncpg.exceptions.DuplicateColumnError:
+        pass  # Колонка уже существует
     
     # Таблица категорий
     await conn.execute('''CREATE TABLE IF NOT EXISTS categories (

@@ -15,6 +15,7 @@ except ImportError:
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
+from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web, ClientSession
 import os
@@ -49,6 +50,72 @@ dp.callback_query.middleware(AntiSpamMiddleware())
 dp.include_router(user_router)
 dp.include_router(admin_management_router)  # Важно: подключаем ДО admin_router
 dp.include_router(admin_router)
+
+# ВРЕМЕННО: добавим хендлеры прямо в dp для отладки
+from button_filters import is_catalog_button, is_cart_button, is_orders_button, is_contact_button, is_info_button, is_language_button
+from pages.manager import page_manager
+
+@dp.message(is_catalog_button)
+async def temp_catalog_handler(message: Message):
+    """Временный хендлер каталога"""
+    print(f"🛍 TEMP CATALOG: Handler called for '{message.text}'")
+    await page_manager.catalog.show_from_message(message)
+
+@dp.message(is_cart_button)  
+async def temp_cart_handler(message: Message):
+    """Временный хендлер корзины"""
+    print(f"🛒 TEMP CART: Handler called for '{message.text}'")
+    await page_manager.cart.show_from_message(message)
+
+@dp.message(is_orders_button)
+async def temp_orders_handler(message: Message):
+    """Временный хендлер заказов"""
+    print(f"📋 TEMP ORDERS: Handler called for '{message.text}'")
+    await page_manager.orders.show_from_message(message)
+
+@dp.message(is_contact_button)
+async def temp_contact_handler(message: Message):
+    """Временный хендлер контактов"""
+    print(f"💬 TEMP CONTACT: Handler called for '{message.text}'")
+    # Используем ту же логику что и callback хендлер
+    user_id = message.from_user.id
+    from message_manager import message_manager
+    
+    # Получаем данные страницы через ProfilePage
+    page_data = await page_manager.profile.render(user_id, type='contact')
+    
+    await message_manager.send_or_edit_message(
+        message.bot, user_id,
+        page_data['text'],
+        reply_markup=page_data['keyboard'],
+        menu_state='contact',
+        force_new=True
+    )
+
+@dp.message(is_info_button)
+async def temp_info_handler(message: Message):
+    """Временный хендлер информации"""
+    print(f"ℹ️ TEMP INFO: Handler called for '{message.text}'")
+    await page_manager.info.show_from_message(message)
+
+@dp.message(is_language_button)
+async def temp_language_handler(message: Message):
+    """Временный хендлер языка"""
+    print(f"🌐 TEMP LANGUAGE: Handler called for '{message.text}'")
+    # Используем ту же логику что и callback хендлер
+    user_id = message.from_user.id
+    from message_manager import message_manager
+    
+    # Получаем данные страницы через ProfilePage
+    page_data = await page_manager.profile.render(user_id, type='language')
+    
+    await message_manager.send_or_edit_message(
+        message.bot, user_id,
+        page_data['text'],
+        reply_markup=page_data['keyboard'],
+        menu_state='language',
+        force_new=True
+    )
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
@@ -167,6 +234,34 @@ async def cmd_help(message: Message):
 
     await message.answer(help_text, parse_mode='HTML')
 
+# ТЕСТОВЫЙ обработчик рассылки в main.py (ВРЕМЕННО)
+@dp.message()
+async def debug_all_messages(message: Message, state: FSMContext):
+    """Глобальный обработчик для отладки всех сообщений"""
+    from config import ADMIN_IDS
+    
+    # Пропускаем кнопки главного меню - они теперь обрабатываются временными хендлерами
+    if (message.text and (is_catalog_button(message) or is_cart_button(message) or is_orders_button(message) or 
+                         is_contact_button(message) or is_info_button(message) or is_language_button(message))):
+        return  # Передаем обработку в временные хендлеры
+    
+    # Логируем только сообщения от админов для уменьшения спама
+    if message.from_user.id in ADMIN_IDS:
+        current_state = await state.get_state()
+        data = await state.get_data()
+        print(f"🌐 GLOBAL DEBUG: Unhandled admin message from {message.from_user.id}")
+        print(f"    Text: '{message.text}'")
+        print(f"    State: {current_state}")
+        print(f"    Data: {data}")
+        
+        # Используем красивую логику рассылки из communication.py
+        if current_state and 'waiting_broadcast_message' in str(current_state):
+            print(f"🚀 BEAUTIFUL BROADCAST: Processing broadcast with branding!")
+            
+            from handlers.admin.communication import process_broadcast_logic
+            await process_broadcast_logic(message, state)
+            return
+
 def kill_other_bot_instances():
     """Завершить другие экземпляры бота"""
     if not PSUTIL_AVAILABLE:
@@ -274,6 +369,11 @@ async def main():
             if admin_id not in ADMIN_IDS:
                 ADMIN_IDS.append(admin_id)
                 logger.info(f"Добавлен админ из БД: {admin_id}")
+        
+        # Загружаем языки пользователей
+        logger.info("Загрузка языков пользователей...")
+        from i18n import i18n
+        await i18n.load_user_languages_from_db()
         
         # Удаляем webhook перед началом работы
         logger.info("Очистка webhook...")

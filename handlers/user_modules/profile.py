@@ -11,6 +11,7 @@ from i18n import _
 import i18n
 from button_filters import is_contact_button, is_language_button
 from pages.manager import page_manager
+from database import db
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,12 @@ async def change_language(callback: CallbackQuery):
     
     # Устанавливаем язык для пользователя
     i18n.i18n.set_language(language, user_id)
+    
+    # Сохраняем в базу данных
+    try:
+        await db.update_user_language(user_id, language)
+    except Exception as e:
+        logger.error(f"Error updating user language in database: {e}")
     
     # Сопоставление кодов языков с ключами переводов
     language_mapping = {

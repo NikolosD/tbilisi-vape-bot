@@ -90,6 +90,17 @@ async def process_location(message: Message, state: FSMContext):
     print(f"DEBUG: Получена геолокация от пользователя {user_id}: lat={location.latitude}, lon={location.longitude}")
     print(f"DEBUG: Текущее состояние пользователя {user_id}: {current_state}")
     
+    # Получаем данные из состояния для удаления предыдущих сообщений
+    data = await state.get_data()
+    location_instruction_msg_id = data.get('location_instruction_msg_id')
+    
+    # Удаляем сообщение с инструкцией геопозиции если есть
+    if location_instruction_msg_id:
+        try:
+            await message.bot.delete_message(chat_id=user_id, message_id=location_instruction_msg_id)
+        except Exception:
+            pass  # Сообщение с инструкцией могло быть уже удалено
+    
     # Сохраняем координаты
     await state.update_data(
         latitude=location.latitude,
@@ -130,8 +141,14 @@ async def handle_manual_address_text(message: Message, state: FSMContext):
     
     # Проверяем, что это именно кнопка "Ввести адрес вручную"
     if message.text == _("checkout.manual_address", user_id=user_id):
+        # Удаляем сообщение пользователя с кнопкой
+        try:
+            await message.delete()
+        except:
+            pass
+        
         # Убираем Reply клавиатуру и отправляем сообщение с запросом адреса
-        await message.answer(
+        enter_address_msg = await message.answer(
             _("checkout.enter_address", user_id=user_id),
             reply_markup=ReplyKeyboardRemove(),
             parse_mode='HTML'
@@ -144,14 +161,23 @@ async def handle_manual_address_text(message: Message, state: FSMContext):
             ])
         )
         
-        # Получаем существующие данные и сохраняем ID сообщения для последующего удаления
+        # Получаем существующие данные и сохраняем ID обоих сообщений для последующего удаления
         data = await state.get_data()
-        await state.update_data(address_msg_id=address_msg.message_id)
+        await state.update_data(
+            enter_address_msg_id=enter_address_msg.message_id,
+            address_msg_id=address_msg.message_id
+        )
         
         await state.set_state(OrderStates.waiting_address)
     elif message.text == "🗺️ Отправить точку на карте":
+        # Удаляем сообщение пользователя с кнопкой
+        try:
+            await message.delete()
+        except:
+            pass
+        
         # Инструкция по отправке геолокации вручную
-        await message.answer(
+        location_instruction_msg = await message.answer(
             "📍 <b>Отправьте свою геопозицию:</b>\n\n"
             "1️⃣ Нажмите на скрепку 📎\n"
             "2️⃣ Выберите «Геопозиция» 🌍\n"
@@ -160,7 +186,17 @@ async def handle_manual_address_text(message: Message, state: FSMContext):
             reply_markup=get_location_request_keyboard(user_id=user_id),
             parse_mode='HTML'
         )
+        
+        # Получаем существующие данные и сохраняем ID сообщения для последующего удаления
+        data = await state.get_data()
+        await state.update_data(location_instruction_msg_id=location_instruction_msg.message_id)
     else:
+        # Удаляем сообщение пользователя с произвольным текстом
+        try:
+            await message.delete()
+        except:
+            pass
+        
         # Если это не кнопка, а произвольный текст, возможно это адрес
         await message.answer(
             "📍 Пожалуйста, используйте кнопки ниже или отправьте геолокацию:",
@@ -181,6 +217,8 @@ async def manual_address(callback: CallbackQuery, state: FSMContext):
         parse_mode='HTML'
     )
     
+    # Сохраняем ID сообщения для последующего удаления
+    await state.update_data(address_msg_id=callback.message.message_id)
     await state.set_state(OrderStates.waiting_address)
 
 @router.message(OrderStates.waiting_contact, F.content_type == 'contact')
@@ -224,8 +262,10 @@ async def process_address(message: Message, state: FSMContext):
     # Удаляем предыдущие сообщения с геолокацией и запросом адреса
     location_msg_id = data.get('location_msg_id')
     address_msg_id = data.get('address_msg_id')
+    enter_address_msg_id = data.get('enter_address_msg_id')
     location_map_msg_id = data.get('location_map_msg_id')
     location_request_msg_id = data.get('location_request_msg_id')
+    location_instruction_msg_id = data.get('location_instruction_msg_id')
     
     if location_msg_id:
         try:
@@ -236,6 +276,12 @@ async def process_address(message: Message, state: FSMContext):
     if address_msg_id:
         try:
             await message.bot.delete_message(chat_id=user_id, message_id=address_msg_id)
+        except Exception:
+            pass  # Сообщение могло быть уже удалено
+    
+    if enter_address_msg_id:
+        try:
+            await message.bot.delete_message(chat_id=user_id, message_id=enter_address_msg_id)
         except Exception:
             pass  # Сообщение могло быть уже удалено
     
@@ -250,6 +296,12 @@ async def process_address(message: Message, state: FSMContext):
             await message.bot.delete_message(chat_id=user_id, message_id=location_request_msg_id)
         except Exception:
             pass  # Сообщение с запросом могло быть уже удалено
+    
+    if location_instruction_msg_id:
+        try:
+            await message.bot.delete_message(chat_id=user_id, message_id=location_instruction_msg_id)
+        except Exception:
+            pass  # Сообщение с инструкцией геопозиции могло быть уже удалено
     
     # Удаляем сообщение пользователя с адресом
     try:
@@ -284,11 +336,21 @@ async def process_address(message: Message, state: FSMContext):
     
     if not user:
         logger.warning(f"Пользователь {user_id} не найден в базе данных, создаем...")
+        
+        # Определяем язык пользователя из Telegram
+        user_lang = 'ru'  # По умолчанию русский
+        if message.from_user.language_code:
+            if message.from_user.language_code.startswith('ka'):
+                user_lang = 'ka'
+            elif message.from_user.language_code.startswith('en'):
+                user_lang = 'en'
+        
         # Создаем пользователя автоматически
         await db.add_user(
             user_id, 
             message.from_user.username, 
-            message.from_user.first_name
+            message.from_user.first_name,
+            user_lang
         )
         user = await db.get_user(user_id)
         if not user:
@@ -418,6 +480,30 @@ async def process_payment_screenshot(message: Message, state: FSMContext):
     """Обработка скриншота оплаты"""
     data = await state.get_data()
     order_id = data['order_id']
+    user_id = message.from_user.id
+    
+    # Проверяем, не был ли уже отправлен скриншот для этого заказа
+    order = await db.get_order_by_number(order_id)
+    if order and order.payment_screenshot:
+        # Скриншот уже был отправлен, удаляем новый и показываем предупреждение
+        try:
+            await message.delete()
+        except:
+            pass
+        
+        warning_msg = await message.answer(
+            f"⚠️ <b>Скриншот уже отправлен!</b>\n\n"
+            f"📸 Заказ #{order_id}\n\n"
+            f"Вы уже отправили скриншот оплаты для этого заказа.\n"
+            f"Ожидайте подтверждения от администратора.",
+            parse_mode='HTML'
+        )
+        
+        # Удаляем предупреждение через 5 секунд
+        import asyncio
+        from handlers.user_modules.cart import delete_message_after_delay
+        asyncio.create_task(delete_message_after_delay(message.bot, message.chat.id, warning_msg.message_id, 5))
+        return
     
     # Сохраняем file_id скриншота
     photo_file_id = message.photo[-1].file_id
@@ -538,6 +624,35 @@ async def process_payment_screenshot(message: Message, state: FSMContext):
             logger.error(f"Полная ошибка: {traceback.format_exc()}")
     
     await state.clear()
+
+@router.message(OrderStates.waiting_payment_screenshot)
+async def reject_non_screenshot(message: Message, state: FSMContext):
+    """Отклонение всех сообщений кроме скриншотов в состоянии ожидания оплаты"""
+    user_id = message.from_user.id
+    
+    # Удаляем сообщение пользователя сразу
+    try:
+        await message.delete()
+    except:
+        pass
+    
+    # Получаем номер заказа из состояния
+    data = await state.get_data()
+    order_id = data.get('order_id', 'N/A')
+    
+    # Отправляем временное предупреждение
+    warning_msg = await message.answer(
+        f"⚠️ <b>Нужен скриншот оплаты!</b>\n\n"
+        f"📸 Заказ #{order_id}\n\n"
+        f"Пожалуйста, пришлите именно <b>изображение</b> (скриншот) с подтверждением оплаты.\n\n"
+        f"💡 Нажмите на скрепку 📎 → Фото/видео → выберите скриншот",
+        parse_mode='HTML'
+    )
+    
+    # Удаляем предупреждение через 5 секунд
+    import asyncio
+    from handlers.user_modules.cart import delete_message_after_delay
+    asyncio.create_task(delete_message_after_delay(message.bot, message.chat.id, warning_msg.message_id, 5))
 
 @router.callback_query(F.data.startswith("cancel_order_"))
 async def cancel_order(callback: CallbackQuery):

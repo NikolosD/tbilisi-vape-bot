@@ -7,6 +7,7 @@ from .base import BasePage
 from database import db
 from keyboards import get_categories_keyboard, get_category_products_keyboard, get_product_card_keyboard
 from i18n import _
+from utils.formatters import format_product_card
 
 
 class CatalogPage(BasePage):
@@ -73,21 +74,20 @@ class CatalogPage(BasePage):
         if not product:
             return await self._render_categories(user_id)
         
-        text = f"🛍️ <b>{product.name}</b>\n\n"
+        # Получаем информацию о корзине
+        cart_items = await db.get_cart(user_id)
+        quantity_in_cart = 0
+        for item in cart_items:
+            if item.product_id == product_id:
+                quantity_in_cart = item.quantity
+                break
         
-        if product.description:
-            text += f"{product.description}\n\n"
-        
-        text += f"💰 <b>{_('product.price', user_id=user_id)}</b> {product.price}₾\n"
-        
-        if product.in_stock and product.stock_quantity > 0:
-            text += f"📦 <b>В наличии:</b> {product.stock_quantity} шт."
-        else:
-            text += f"❌ <b>{_('product.out_of_stock', user_id=user_id)}</b>"
+        # Используем унифицированный форматтер
+        text = format_product_card(product, quantity_in_cart, user_id)
         
         result = {
             'text': text,
-            'keyboard': get_product_card_keyboard(product.id, in_cart=False, from_category=None)
+            'keyboard': get_product_card_keyboard(product.id, in_cart=(quantity_in_cart > 0), from_category=None)
         }
         
         # Добавляем фото если есть

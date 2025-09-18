@@ -77,8 +77,20 @@ class I18n:
         if language in self.translations:
             if user_id:
                 self.user_languages[user_id] = language
+                # Асинхронное обновление в БД будет происходить в обработчиках
             else:
                 self.current_language = language
+    
+    async def load_user_languages_from_db(self):
+        """Загрузить языки пользователей из базы данных"""
+        try:
+            from database import db
+            users_data = await db.fetchall("SELECT user_id, language_code FROM users WHERE language_code IS NOT NULL")
+            for user_id, language_code in users_data:
+                if language_code and language_code in self.translations:
+                    self.user_languages[user_id] = language_code
+        except Exception as e:
+            print(f"Ошибка загрузки языков пользователей: {e}")
     
     def get_user_language(self, user_id: int) -> str:
         """Получить язык пользователя"""

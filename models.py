@@ -14,6 +14,7 @@ class User(NamedTuple):
     first_name: Optional[str]
     phone: Optional[str]
     address: Optional[str]
+    language_code: Optional[str]
     created_at: datetime
     
 

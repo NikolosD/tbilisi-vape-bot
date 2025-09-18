@@ -11,6 +11,36 @@ from i18n import _
 
 router = Router()
 
+async def safe_edit_message(callback, text, reply_markup=None, parse_mode='HTML'):
+    """Безопасно редактировать сообщение (поддерживает и text и caption)"""
+    try:
+        if callback.message.photo:
+            # Если есть фото, редактируем caption
+            await callback.message.edit_caption(
+                caption=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+        else:
+            # Если обычное текстовое сообщение, редактируем text
+            await callback.message.edit_text(
+                text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+    except Exception as e:
+        # Если редактирование не удалось, удаляем старое и создаем новое
+        try:
+            await callback.message.delete()
+        except:
+            pass
+        await callback.bot.send_message(
+            chat_id=callback.message.chat.id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode
+        )
+
 class OrderStates(StatesGroup):
     waiting_order_search = State()
     waiting_rejection_reason = State()
@@ -475,6 +505,9 @@ async def quick_confirm_payment(callback: CallbackQuery):
             f"✅ <b>Оплата подтверждена!</b>\n\n"
             f"Заказ #{order.order_number} принят в обработку.\n"
             f"Готовим ваш заказ к отправке! 📦",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
+            ]),
             parse_mode='HTML'
         )
     except:
@@ -482,15 +515,15 @@ async def quick_confirm_payment(callback: CallbackQuery):
     
     await callback.answer("✅ Платеж подтвержден!", show_alert=True)
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback,
         f"✅ <b>Платеж подтвержден</b>\n\n"
         f"Заказ #{order.order_number} - {order.total_price}₾\n"
         f"Статус изменен на: Оплачен",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔧 Управлять заказом", callback_data=f"admin_order_{order_id}")],
             [InlineKeyboardButton(text="📋 Все заказы", callback_data="admin_all_orders")]
-        ]),
-        parse_mode='HTML'
+        ])
     )
 
 @router.callback_query(F.data.startswith("quick_reject_"), admin_filter)
@@ -522,16 +555,19 @@ async def quick_reject_payment(callback: CallbackQuery):
     
     await callback.answer("❌ Платеж отклонен!", show_alert=True)
     
-    await callback.message.edit_text(
+    new_text = (
         f"❌ <b>Платеж отклонен</b>\n\n"
         f"Заказ #{order.order_number} - {order.total_price}₾\n"
-        f"Статус изменен на: Ожидает оплаты",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔧 Управлять заказом", callback_data=f"admin_order_{order_id}")],
-            [InlineKeyboardButton(text="📋 Все заказы", callback_data="admin_all_orders")]
-        ]),
-        parse_mode='HTML'
+        f"Статус изменен на: Ожидает оплаты"
     )
+    
+    new_markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔧 Управлять заказом", callback_data=f"admin_order_{order_id}")],
+        [InlineKeyboardButton(text="📋 Все заказы", callback_data="admin_all_orders")]
+    ])
+    
+    # Используем безопасную функцию для редактирования сообщения
+    await safe_edit_message(callback, new_text, new_markup)
 
 @router.callback_query(F.data.startswith("admin_orders_"), admin_filter)
 async def show_filtered_orders(callback: CallbackQuery):
