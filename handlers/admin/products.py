@@ -8,6 +8,7 @@ from database import db
 from filters.admin import admin_filter
 from keyboards import get_admin_products_keyboard, get_category_selection_keyboard
 from i18n import _
+from utils.loader import with_loader
 
 router = Router()
 
@@ -141,16 +142,31 @@ async def delete_product(callback: CallbackQuery):
     """Удаление товара"""
     product_id = int(callback.data.split("_")[2])
     
-    await db.execute("DELETE FROM products WHERE id = $1", product_id)
+    # Создаем функцию для выполнения с лоадером
+    async def delete_product_operation():
+        await db.execute("DELETE FROM products WHERE id = $1", product_id)
+        return {
+            "text": "✅ Товар удален из каталога!",
+            "keyboard": InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Управление товарами", callback_data="admin_products")]
+            ])
+        }
     
-    await callback.message.edit_text(
-        "✅ <b>Товар удален!</b>\n\n"
-        "Товар успешно удален из каталога.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Управление товарами", callback_data="admin_products")]
-        ]),
-        parse_mode='HTML'
-    )
+    # Выполняем удаление с лоадером
+    try:
+        await with_loader(
+            delete_product_operation,
+            callback.bot,
+            callback.message.chat.id,
+            callback.message.message_id,
+            user_id=callback.from_user.id,
+            loader_text="Удаляем товар из каталога...",
+            final_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Управление товарами", callback_data="admin_products")]
+            ])
+        )
+    except Exception as e:
+        await callback.answer(f"❌ Ошибка удаления: {e}", show_alert=True)
 
 @router.callback_query(F.data.startswith("toggle_stock_"), admin_filter)
 async def toggle_product_stock(callback: CallbackQuery):

@@ -1,5 +1,6 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
 import logging
 
 from config import ADMIN_IDS, SUPER_ADMIN_ID
@@ -30,10 +31,13 @@ async def noop_handler(callback: CallbackQuery):
     await callback.answer()
 
 @router.callback_query(F.data == "back_to_menu")
-async def back_to_menu(callback: CallbackQuery):
+async def back_to_menu(callback: CallbackQuery, state: FSMContext):
     """Вернуться в главное меню"""
     user_id = callback.from_user.id
     is_admin = user_id in ADMIN_IDS
+    
+    # Очищаем состояние при возврате в главное меню
+    await state.clear()
     
     await message_manager.handle_callback_navigation(
         callback,

@@ -10,13 +10,14 @@ from config import DELIVERY_ZONES, MIN_ORDER_AMOUNT, PAYMENT_INFO, ADMIN_IDS
 from models import OrderStatus
 from message_manager import message_manager
 from keyboards import (
-    get_location_request_keyboard, get_order_confirmation_keyboard,
+    get_order_confirmation_keyboard,
     get_order_details_keyboard, get_payment_notification_keyboard,
     get_admin_quick_actions_keyboard
 )
 from i18n import _
 from button_filters import is_orders_button
 from pages.manager import page_manager
+from utils.loader import with_loader
 
 logger = logging.getLogger(__name__)
 
@@ -64,33 +65,62 @@ async def start_checkout(callback: CallbackQuery, state: FSMContext):
         )
         return
     
-    # Удаляем inline сообщение и отправляем новое с Reply клавиатурой
+    # Удаляем inline сообщение и отправляем новое
     await callback.message.delete()
     
-    print(f"DEBUG: Пользователь {user_id} начал checkout, отправляем Reply клавиатуру")
+    print(f"DEBUG: Пользователь {user_id} начал checkout, отправляем единое сообщение")
     
-    # Отправляем единое сообщение с расширенным текстом
-    combined_text = _("checkout.location_request", user_id=user_id).format(total=total) + "\n\n👆 Выберите способ выше или используйте кнопки ниже:"
+    # Формируем текст с полной информацией
+    combined_text = _("checkout.location_request", user_id=user_id).format(total=total)
+    combined_text += "\n\n🔽 <b>Выберите способ доставки:</b>"
     
+    # Создаем inline клавиатуру со всеми опциями
+    inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📍 Отправить геолокацию", callback_data="send_location_guide")],
+        [InlineKeyboardButton(text="✍️ Ввести адрес вручную", callback_data="manual_address")],
+        [InlineKeyboardButton(text="🔙 Назад к корзине", callback_data="cart")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
+    ])
+    
+    # Отправляем единое сообщение с inline клавиатурой
     location_request_msg = await callback.message.answer(
         combined_text,
-        reply_markup=get_location_request_keyboard(user_id=user_id),
+        reply_markup=inline_keyboard,
         parse_mode='HTML'
     )
     
-    # Отправляем inline кнопки навигации отдельно (они будут под сообщением)
-    navigation_msg = await callback.message.answer(
-        "🔽 Навигация:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад к корзине", callback_data="cart")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
-        ])
-    )
-    
     await state.set_state(OrderStates.waiting_location)
-    await state.update_data(total=total, location_request_msg_id=location_request_msg.message_id, navigation_msg_id=navigation_msg.message_id)
+    await state.update_data(total=total, location_request_msg_id=location_request_msg.message_id)
     
     print(f"DEBUG: Состояние установлено на waiting_location для пользователя {user_id}")
+
+# Обработчик кнопки для отправки геолокации
+@router.callback_query(F.data == "send_location_guide")
+async def send_location_guide(callback: CallbackQuery, state: FSMContext):
+    """Показать инструкцию для отправки геолокации"""
+    user_id = callback.from_user.id
+    
+    guide_text = """📍 <b>Как отправить геолокацию:</b>
+
+1️⃣ Нажмите на скрепку 📎 в поле ввода
+2️⃣ Выберите «Геопозиция» или «Location» 🌍
+3️⃣ Отправьте текущую позицию или выберите точку на карте
+
+<i>После отправки геолокации вы сможете указать точный адрес доставки.</i>"""
+    
+    # Обновляем сообщение с инструкцией
+    await callback.message.edit_text(
+        guide_text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✍️ Ввести адрес вручную", callback_data="manual_address")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="checkout")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
+        ]),
+        parse_mode='HTML'
+    )
+    
+    # Состояние уже установлено в waiting_location
+    await callback.answer()
 
 # Обработчик геолокации (ДОЛЖЕН БЫТЬ ВЫШЕ ТЕКСТОВОГО!)
 @router.message(OrderStates.waiting_location, F.location)
@@ -144,155 +174,24 @@ async def process_location(message: Message, state: FSMContext):
     
     await state.set_state(OrderStates.waiting_address)
 
-# Обработчик для текстовой кнопки "Ввести адрес вручную" из Reply клавиатуры
-@router.message(OrderStates.waiting_location, F.text)
-async def handle_manual_address_text(message: Message, state: FSMContext):
-    """Обработка нажатия кнопки 'Ввести адрес вручную' в Reply клавиатуре"""
-    user_id = message.from_user.id
-    
-    print(f"🚀 DEBUG: ВХОД В ОБРАБОТЧИК handle_manual_address_text")
-    print(f"DEBUG: Получен текст от пользователя {user_id}: '{message.text}'")
-    
-    # Проверяем, что это именно кнопка "Ввести адрес вручную"
-    # Проверяем и локализованный текст, и прямой текст кнопки
-    manual_address_text = _("checkout.manual_address", user_id=user_id)
-    print(f"DEBUG: Ожидаемый текст кнопки: '{manual_address_text}'")
-    print(f"DEBUG: Полученный текст: '{message.text}'")
-    print(f"DEBUG: Совпадение: {message.text == manual_address_text}")
-    
-    if message.text == manual_address_text or message.text == "✍️ Ввести адрес вручную":
-        # НЕ удаляем сообщение пользователя сразу
-        
-        # Убираем Reply клавиатуру и отправляем единое сообщение с запросом адреса и кнопками
-        enter_address_msg = await message.answer(
-            "📝 <b>Ввод адреса доставки</b>\n\n"
-            "Введите полный адрес доставки в следующем сообщении.\n"
-            "Например: ул. Руставели 25, кв. 10\n\n"
-            "👇 Или выберите действие:",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔙 Назад", callback_data="checkout")],
-                [InlineKeyboardButton(text="🛒 Корзина", callback_data="cart")],
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
-            ]),
-            parse_mode='HTML'
-        )
-        
-        # Теперь у нас только одно сообщение
-        nav_msg = enter_address_msg
-        
-        # Теперь удаляем сообщение пользователя
-        try:
-            await message.delete()
-        except:
-            pass
-        
-        # Получаем существующие данные для удаления предыдущих сообщений
-        data = await state.get_data()
-        location_request_msg_id = data.get('location_request_msg_id')
-        navigation_msg_id = data.get('navigation_msg_id')
-        
-        # Удаляем предыдущие сообщения
-        if location_request_msg_id:
-            try:
-                await message.bot.delete_message(chat_id=user_id, message_id=location_request_msg_id)
-            except Exception:
-                pass  # Сообщение могло быть уже удалено
-        
-        if navigation_msg_id:
-            try:
-                await message.bot.delete_message(chat_id=user_id, message_id=navigation_msg_id)
-            except Exception:
-                pass  # Навигационное сообщение могло быть уже удалено
-        
-        # Сохраняем ID нового сообщения для последующего удаления
-        await state.update_data(
-            enter_address_msg_id=enter_address_msg.message_id,
-            address_msg_id=nav_msg.message_id
-        )
-        
-        await state.set_state(OrderStates.waiting_address)
-        print(f"DEBUG: Состояние изменено на waiting_address для пользователя {user_id}")
-    elif message.text == "🗺️ Отправить точку на карте":
-        # Удаляем сообщение пользователя с кнопкой
-        try:
-            await message.delete()
-        except:
-            pass
-        
-        # Инструкция по отправке геолокации вручную
-        location_instruction_msg = await message.answer(
-            "📍 <b>Отправьте свою геопозицию:</b>\n\n"
-            "1️⃣ Нажмите на скрепку 📎\n"
-            "2️⃣ Выберите «Геопозиция» 🌍\n"
-            "3️⃣ Отправьте вашу текущую позицию или выберите точку на карте\n\n"
-            "<i>Или используйте кнопки ниже:</i>",
-            reply_markup=get_location_request_keyboard(user_id=user_id),
-            parse_mode='HTML'
-        )
-        
-        # Получаем существующие данные для удаления предыдущих сообщений
-        data = await state.get_data()
-        location_request_msg_id = data.get('location_request_msg_id')
-        navigation_msg_id = data.get('navigation_msg_id')
-        
-        # Удаляем предыдущие сообщения
-        if location_request_msg_id:
-            try:
-                await message.bot.delete_message(chat_id=user_id, message_id=location_request_msg_id)
-            except Exception:
-                pass  # Сообщение могло быть уже удалено
-        
-        if navigation_msg_id:
-            try:
-                await message.bot.delete_message(chat_id=user_id, message_id=navigation_msg_id)
-            except Exception:
-                pass  # Навигационное сообщение могло быть уже удалено
-        
-        # Сохраняем ID нового сообщения для последующего удаления
-        await state.update_data(location_instruction_msg_id=location_instruction_msg.message_id)
-    else:
-        print(f"DEBUG: Текст '{message.text}' не совпал с известными кнопками")
-        
-        # Проверяем, может это прямой ввод адреса
-        # Если текст не является кнопкой, обрабатываем как адрес
-        if len(message.text) > 5 and not message.text.startswith("📍") and not message.text.startswith("🗺️"):
-            print(f"DEBUG: Обрабатываем как прямой ввод адреса")
-            # Переводим в состояние ожидания адреса и обрабатываем
-            await state.set_state(OrderStates.waiting_address)
-            await process_address(message, state)
-            return
-        
-        # Удаляем сообщение пользователя с произвольным текстом
-        try:
-            await message.delete()
-        except:
-            pass
-        
-        # Если это не кнопка и не адрес, показываем предупреждение
-        # Сначала отправляем предупреждение без клавиатуры
-        warning_msg = await message.answer(
-            "⚠️ Пожалуйста, используйте кнопки ниже или отправьте геолокацию через меню 📎"
-        )
-        
-        # Затем отправляем сообщение с клавиатурой
-        await message.answer(
-            "📍 Выберите способ указания адреса:",
-            reply_markup=get_location_request_keyboard(user_id=user_id)
-        )
-        
-        # Удаляем только предупреждение через 5 секунд
-        import asyncio
-        from handlers.user_modules.cart import delete_message_after_delay
-        asyncio.create_task(delete_message_after_delay(message.bot, message.chat.id, warning_msg.message_id, 5))
-
-# Обработчик для старой inline кнопки (оставим для совместимости)
+# Обработчик для inline кнопки manual_address
 @router.callback_query(F.data == "manual_address")
 async def manual_address(callback: CallbackQuery, state: FSMContext):
     """Ввод адреса вручную (inline кнопка)"""
     user_id = callback.from_user.id
     
+    # Формируем текст для ввода адреса
+    address_text = """📝 <b>Ввод адреса доставки</b>
+
+Введите полный адрес доставки в следующем сообщении.
+
+<b>Пример:</b>
+ул. Руставели 25, кв. 10
+
+<i>Укажите улицу, дом, квартиру и любые дополнительные детали для курьера.</i>"""
+    
     await callback.message.edit_text(
-        _("checkout.enter_address", user_id=user_id),
+        address_text,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Назад", callback_data="checkout")],
             [InlineKeyboardButton(text="🛒 Корзина", callback_data="cart")],
@@ -304,6 +203,7 @@ async def manual_address(callback: CallbackQuery, state: FSMContext):
     # Сохраняем ID сообщения для последующего удаления
     await state.update_data(address_msg_id=callback.message.message_id)
     await state.set_state(OrderStates.waiting_address)
+    await callback.answer()
 
 @router.message(OrderStates.waiting_contact, F.content_type == 'contact')
 async def process_contact(message: Message, state: FSMContext):
@@ -339,13 +239,9 @@ async def process_address(message: Message, state: FSMContext):
     # Отладочная информация
     logger.info(f"Получен адрес: {address} от пользователя {user_id}")
     
-    # Убираем Reply клавиатуру и показываем загрузку
+    # Убираем Reply клавиатуру и создаем сообщение для лоадера
     loading_msg = await message.answer(
-        "⏳ <b>Обрабатываем ваш заказ...</b>\n\n"
-        "🔄 Создание заказа\n"
-        "💳 Подготовка реквизитов\n"
-        "📦 Резервирование товаров\n\n"
-        "Пожалуйста, подождите...",
+        "⏳ Обрабатываем заказ...",
         reply_markup=ReplyKeyboardRemove(),
         parse_mode='HTML'
     )
@@ -404,6 +300,7 @@ async def process_address(message: Message, state: FSMContext):
             await message.bot.delete_message(chat_id=user_id, message_id=navigation_msg_id)
         except Exception:
             pass  # Навигационное сообщение могло быть уже удалено
+    
     
     # Удаляем сообщение пользователя с адресом
     try:
@@ -513,8 +410,9 @@ async def process_address(message: Message, state: FSMContext):
     
     logger.info(f"Данные товаров для заказа: {products_data}")
     
-    # Создаем заказ
-    try:
+    # Создаем функцию для выполнения заказа с лоадером
+    async def create_order_operation():
+        # Создаем заказ
         order_id = await db.create_order(
             user_id=user_id,
             products=products_data,
@@ -527,13 +425,25 @@ async def process_address(message: Message, state: FSMContext):
             longitude=longitude
         )
         logger.info(f"Заказ создан с номером: {order_id}")
+        
+        # Очищаем корзину
+        await db.clear_cart(user_id)
+        
+        return order_id
+    
+    # Выполняем создание заказа с лоадером
+    try:
+        order_id = await with_loader(
+            create_order_operation,
+            message.bot,
+            loading_msg.chat.id,
+            loading_msg.message_id,
+            user_id=user_id,
+            loader_text="Создаем заказ и резервируем товары...",
+            success_text="🔄 Формируем детали заказа..."
+        )
     except Exception as e:
         logger.error(f"Ошибка создания заказа: {e}", exc_info=True)
-        # Удаляем сообщение загрузки
-        try:
-            await loading_msg.delete()
-        except Exception:
-            pass
         
         await message.answer(
             "❌ Ошибка при создании заказа. Попробуйте еще раз.",
@@ -544,9 +454,6 @@ async def process_address(message: Message, state: FSMContext):
         )
         await state.clear()
         return
-    
-    # Очищаем корзину
-    await db.clear_cart(user_id)
     
     # Формируем детали заказа
     order_text = f"""✅ <b>Заказ #{order_id} создан!</b>
@@ -589,20 +496,32 @@ async def process_address(message: Message, state: FSMContext):
     except Exception:
         pass
     
-    # Удаляем сообщение загрузки перед отправкой финального сообщения
-    try:
-        await loading_msg.delete()
-    except Exception:
-        pass
     
-    # Используем менеджер сообщений для замены предыдущего сообщения
-    await message_manager.send_or_edit_message(
-        message.bot, user_id,
-        order_text,
-        reply_markup=get_order_confirmation_keyboard(order_id, user_id=user_id),
-        menu_state='order_created',
-        force_new=True
-    )
+    # Заменяем сообщение лоадера на финальные детали заказа
+    try:
+        await loading_msg.edit_text(
+            order_text,
+            reply_markup=get_order_confirmation_keyboard(order_id, user_id=user_id),
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.warning(f"Не удалось отредактировать сообщение заказа: {e}")
+        # Удаляем старое сообщение лоадера
+        try:
+            await loading_msg.delete()
+        except Exception:
+            pass
+        # Отправляем новое сообщение
+        await message_manager.send_or_edit_message(
+            message.bot, user_id,
+            order_text,
+            reply_markup=get_order_confirmation_keyboard(order_id, user_id=user_id),
+            menu_state='order_created',
+            force_new=True
+        )
+    else:
+        # Обновляем менеджер сообщений
+        message_manager.set_user_message(user_id, loading_msg.message_id, 'order_created')
     
     # Уведомление админу будет отправлено только после загрузки скриншота оплаты
     
@@ -668,10 +587,10 @@ async def process_payment_screenshot(message: Message, state: FSMContext):
     except Exception:
         pass
     
-    # Удаляем предыдущее сообщение с запросом скриншота
+    # Очищаем все сообщения пользователя чтобы убрать засорение чата
     user_id = message.from_user.id
     try:
-        await message_manager.delete_user_message(message.bot, user_id)
+        await message_manager.delete_all_user_messages(message.bot, user_id)
     except Exception:
         pass
     
@@ -829,7 +748,7 @@ async def cancel_order(callback: CallbackQuery):
     # Отменяем заказ
     await db.update_order_status(order.id, 'cancelled')
     
-    await callback.answer("✅ Заказ отменен", show_alert=True)
+    # Popup убираем, так как сообщение обновляется ниже
     
     # Обновляем сообщение
     await message_manager.handle_callback_navigation(
@@ -903,6 +822,15 @@ async def resend_screenshot(callback: CallbackQuery, state: FSMContext):
         await callback.answer(_("error.order_not_found", user_id=user_id), show_alert=True)
         return
     
+    # Очищаем старый скриншот чтобы пользователь мог отправить новый
+    await db.update_order_screenshot(order.id, None)
+    
+    # Очищаем все предыдущие сообщения пользователя
+    try:
+        await message_manager.delete_all_user_messages(callback.bot, user_id)
+    except Exception:
+        pass
+    
     # Сохраняем номер заказа в состоянии
     await state.update_data(order_id=order_number)
     await state.set_state(OrderStates.waiting_payment_screenshot)
@@ -921,19 +849,25 @@ async def resend_screenshot(callback: CallbackQuery, state: FSMContext):
     
     await callback.answer()
 
-# Общий отладочный обработчик для всех сообщений в состоянии waiting_location (ДОЛЖЕН БЫТЬ ПОСЛЕДНИМ!)
+# Обработчик текстовых сообщений в состоянии waiting_location - обрабатываем как возможный адрес
 @router.message(OrderStates.waiting_location)
-async def debug_waiting_location(message: Message, state: FSMContext):
-    """Отладочный обработчик для всех сообщений в waiting_location"""
+async def handle_text_in_waiting_location(message: Message, state: FSMContext):
+    """Обработка текста в состоянии ожидания локации - возможно это адрес"""
     user_id = message.from_user.id
-    current_state = await state.get_state()
     
-    print(f"DEBUG: Пользователь {user_id} отправил необработанное сообщение в состоянии {current_state}")
-    print(f"DEBUG: Тип сообщения: {message.content_type}")
-    if message.text:
-        print(f"DEBUG: Текст сообщения: '{message.text}'")
-    if message.location:
-        print(f"DEBUG: Координаты: lat={message.location.latitude}, lon={message.location.longitude}")
+    # Удаляем сообщение пользователя
+    try:
+        await message.delete()
+    except:
+        pass
     
-    # Отвечаем пользователю, что мы получили сообщение, но не знаем что с ним делать
-    await message.answer("🤔 Получил ваше сообщение, но что-то пошло не так. Попробуйте снова.")
+    # Показываем временную подсказку
+    hint_msg = await message.answer(
+        "❓ Пожалуйста, используйте кнопки выше для выбора способа доставки.",
+        parse_mode='HTML'
+    )
+    
+    # Удаляем подсказку через 3 секунды
+    import asyncio
+    from handlers.user_modules.cart import delete_message_after_delay
+    asyncio.create_task(delete_message_after_delay(message.bot, message.chat.id, hint_msg.message_id, 3))

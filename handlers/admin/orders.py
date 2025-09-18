@@ -8,6 +8,8 @@ from database import db
 from filters.admin import admin_filter
 from keyboards import get_admin_order_actions_keyboard, get_admin_orders_keyboard
 from i18n import _
+from utils.loader import with_loader
+from handlers.user_modules.cart import delete_message_after_delay
 
 router = Router()
 
@@ -282,15 +284,33 @@ async def confirm_payment(callback: CallbackQuery):
         await callback.answer("❌ Заказ не найден", show_alert=True)
         return
     
-    # Списываем товары со склада при подтверждении платежа
-    try:
-        products = order.products_data
-        for product in products:
-            await db.decrease_product_quantity(product['id'], product['quantity'])
-    except Exception as e:
-        print(f"Error decreasing stock on payment confirmation: {e}")
+    # Создаем функцию для выполнения с лоадером
+    async def confirm_payment_operation():
+        # Списываем товары со склада при подтверждении платежа
+        try:
+            products = order.products_data
+            for product in products:
+                await db.decrease_product_quantity(product['id'], product['quantity'])
+        except Exception as e:
+            print(f"Error decreasing stock on payment confirmation: {e}")
+        
+        await db.update_order_status(order_id, 'paid')
+        return order
     
-    await db.update_order_status(order_id, 'paid')
+    # Выполняем подтверждение с лоадером
+    try:
+        await with_loader(
+            confirm_payment_operation,
+            callback.bot,
+            callback.message.chat.id,
+            callback.message.message_id,
+            user_id=callback.from_user.id,
+            loader_text="Подтверждаем оплату и списываем товары...",
+            success_text="✅ Оплата подтверждена!"
+        )
+    except Exception as e:
+        await callback.answer(f"❌ Ошибка подтверждения: {e}", show_alert=True)
+        return
     
     try:
         await callback.message.bot.send_message(
@@ -306,7 +326,18 @@ async def confirm_payment(callback: CallbackQuery):
     except:
         pass
     
-    await callback.answer("✅ Оплата подтверждена!")
+    # Показываем временное уведомление об успехе
+    success_msg = await callback.message.answer(
+        "✅ <b>Оплата подтверждена!</b>\n\n"
+        "🔄 Товары списаны со склада\n"
+        "📧 Уведомление отправлено клиенту",
+        parse_mode='HTML'
+    )
+    
+    # Удаляем уведомление через 3 секунды
+    import asyncio
+    asyncio.create_task(delete_message_after_delay(callback.bot, callback.message.chat.id, success_msg.message_id, 3))
+    
     await show_admin_order(callback)
 
 @router.message(admin_filter)
@@ -351,6 +382,8 @@ async def process_rejection_reason(message: Message, state: FSMContext):
         return
     
     await db.update_order_status(order_id, 'waiting_payment')
+    # Очищаем скриншот чтобы пользователь мог отправить новый
+    await db.update_order_screenshot(order_id, None)
     
     message_text = _("admin.payment_rejected", user_id=user_id, 
                     order_number=order_number, 
@@ -404,22 +437,37 @@ async def ship_order(callback: CallbackQuery):
         await callback.answer("❌ Заказ не найден", show_alert=True)
         return
     
-    await db.update_order_status(order_id, 'shipping')
+    # Создаем функцию для выполнения с лоадером
+    async def ship_order_operation():
+        await db.update_order_status(order_id, 'shipping')
+        
+        try:
+            await callback.message.bot.send_message(
+                order.user_id,
+                f"🚚 <b>Заказ в пути!</b>\n\n"
+                f"Заказ #{order.order_number} отправлен по адресу:\n"
+                f"{order.address}\n\n"
+                f"Ожидайте курьера! 📦",
+                parse_mode='HTML'
+            )
+        except:
+            pass
+        
+        return {"text": "🚚 Заказ отправлен и клиент уведомлен!"}
     
+    # Выполняем отправку с лоадером
     try:
-        await callback.message.bot.send_message(
-            order.user_id,
-            f"🚚 <b>Заказ в пути!</b>\n\n"
-            f"Заказ #{order.order_number} отправлен по адресу:\n"
-            f"{order.address}\n\n"
-            f"Ожидайте курьера! 📦",
-            parse_mode='HTML'
+        await with_loader(
+            ship_order_operation,
+            callback.bot,
+            callback.message.chat.id,
+            callback.message.message_id,
+            user_id=callback.from_user.id,
+            loader_text="Отправляем заказ и уведомляем клиента..."
         )
-    except:
-        pass
-    
-    await callback.answer("🚚 Заказ отправлен!")
-    await show_admin_order(callback)
+        await show_admin_order(callback)
+    except Exception as e:
+        await callback.answer(f"❌ Ошибка отправки: {e}", show_alert=True)
 
 @router.callback_query(F.data.startswith("admin_deliver_"), admin_filter)
 async def deliver_order(callback: CallbackQuery):
@@ -431,21 +479,37 @@ async def deliver_order(callback: CallbackQuery):
         await callback.answer("❌ Заказ не найден", show_alert=True)
         return
     
-    await db.update_order_status(order_id, 'delivered')
+    # Создаем функцию для выполнения с лоадером
+    async def deliver_order_operation():
+        await db.update_order_status(order_id, 'delivered')
+        
+        try:
+            await callback.message.bot.send_message(
+                order.user_id,
+                f"✅ <b>Заказ доставлен!</b>\n\n"
+                f"Заказ #{order.order_number} успешно доставлен.\n"
+                f"Спасибо за покупку! 🙏\n\n"
+                f"Оцените качество обслуживания и поделитесь отзывом!",
+                parse_mode='HTML'
+            )
+        except:
+            pass
+        
+        return {"text": "✅ Заказ доставлен и клиент уведомлен!"}
     
+    # Выполняем доставку с лоадером
     try:
-        await callback.message.bot.send_message(
-            order.user_id,
-            f"✅ <b>Заказ доставлен!</b>\n\n"
-            f"Заказ #{order.order_number} успешно доставлен.\n"
-            f"Спасибо за покупку! 🙏\n\n"
-            f"Оцените качество обслуживания и поделитесь отзывом!",
-            parse_mode='HTML'
+        await with_loader(
+            deliver_order_operation,
+            callback.bot,
+            callback.message.chat.id,
+            callback.message.message_id,
+            user_id=callback.from_user.id,
+            loader_text="Отмечаем доставку и уведомляем клиента..."
         )
-    except:
-        pass
-    
-    await callback.answer("✅ Заказ доставлен!")
+    except Exception as e:
+        await callback.answer(f"❌ Ошибка доставки: {e}", show_alert=True)
+        return
     
     await callback.message.edit_text(
         "📋 <b>Управление заказами</b>",
@@ -570,7 +634,18 @@ async def set_order_status(callback: CallbackQuery):
         'cancelled': 'Отменен'
     }
     
-    await callback.answer(f"✅ Статус изменен на: {status_names.get(status, status)}")
+    # Показываем временное уведомление об изменении статуса
+    status_msg = await callback.message.answer(
+        f"✅ <b>Статус изменен!</b>\n\n"
+        f"📋 Новый статус: {status_names.get(status, status)}\n"
+        f"🔄 Уведомление отправлено клиенту",
+        parse_mode='HTML'
+    )
+    
+    # Удаляем уведомление через 3 секунды
+    import asyncio
+    asyncio.create_task(delete_message_after_delay(callback.bot, callback.message.chat.id, status_msg.message_id, 3))
+    
     await show_admin_order(callback)
 
 @router.callback_query(F.data.startswith("quick_confirm_"), admin_filter)
@@ -631,6 +706,8 @@ async def quick_reject_payment(callback: CallbackQuery):
         return
     
     await db.update_order_status(order_id, 'waiting_payment')
+    # Очищаем скриншот чтобы пользователь мог отправить новый
+    await db.update_order_screenshot(order_id, None)
     
     try:
         await callback.message.bot.send_message(

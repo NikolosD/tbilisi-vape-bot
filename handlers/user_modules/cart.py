@@ -73,8 +73,15 @@ async def update_cart_display(callback: CallbackQuery):
             logger.info("✅ Корзина успешно обновлена без создания нового сообщения")
         except Exception as e:
             logger.warning(f"❌ Не удалось отредактировать сообщение корзины: {e}")
-            # НЕ создаем новое сообщение - просто логируем ошибку
-            await callback.answer("⚠️ Ошибка обновления корзины", show_alert=False)
+            # Показываем временное сообщение об ошибке
+            error_msg = await callback.message.answer(
+                "⚠️ <b>Ошибка обновления корзины</b>\n\n"
+                "Попробуйте перейти в корзину заново",
+                parse_mode='HTML'
+            )
+            # Удаляем сообщение об ошибке через 3 секунды
+            import asyncio
+            asyncio.create_task(delete_message_after_delay(callback.bot, callback.message.chat.id, error_msg.message_id, 3))
         return True
     return False
 
@@ -89,6 +96,7 @@ async def safe_cart_operation(user_id: int, callback: CallbackQuery, operation_f
     """Безопасная операция с корзиной - предотвращает race conditions"""
     # Проверяем, есть ли уже активная операция для этого пользователя
     if user_id in user_cart_operations:
+        # Используем всплывающее уведомление для быстрого уведомления о блокировке
         await callback.answer("⏳ Подождите, операция выполняется...", show_alert=False)
         return
     
@@ -117,8 +125,10 @@ async def show_cart(message: Message):
         traceback.print_exc()
 
 @router.callback_query(F.data == "cart")
-async def callback_cart(callback: CallbackQuery):
+async def callback_cart(callback: CallbackQuery, state: FSMContext):
     """Показать корзину через callback"""
+    # Очищаем состояние если пользователь был в процессе оформления заказа
+    await state.clear()
     await page_manager.cart.show_from_callback(callback)
 
 @router.callback_query(F.data.startswith("add_to_cart_"))
@@ -201,7 +211,17 @@ async def add_to_cart(callback: CallbackQuery):
             quantity_in_cart = item.quantity
             break
     
-    await callback.answer("✅ Товар добавлен в корзину (зарезервирован на 15 мин)", show_alert=False)
+    # Показываем временное уведомление о добавлении товара
+    success_msg = await callback.message.answer(
+        "✅ <b>Товар добавлен в корзину!</b>\n\n"
+        "🔒 Товар зарезервирован на 15 минут\n"
+        "⏰ Завершите заказ в течение этого времени",
+        parse_mode='HTML'
+    )
+    
+    # Удаляем уведомление через 4 секунды
+    import asyncio
+    asyncio.create_task(delete_message_after_delay(callback.bot, callback.message.chat.id, success_msg.message_id, 4))
     
     # Обновляем текст товара с информацией о количестве в корзине
     product_text = await format_product_card(product, quantity_in_cart, callback.from_user.id)
@@ -318,7 +338,14 @@ async def cart_increase(callback: CallbackQuery):
                     logger.info("✅ Карточка товара обновлена в cart_increase")
                 except Exception as e:
                     logger.warning(f"❌ Не удалось отредактировать карточку товара в cart_increase: {e}")
-                    await callback.answer("⚠️ Ошибка обновления", show_alert=False)
+                    # Показываем временное сообщение об ошибке
+                    error_msg = await callback.message.answer(
+                        "⚠️ <b>Ошибка обновления товара</b>\n\n"
+                        "Попробуйте обновить страницу",
+                        parse_mode='HTML'
+                    )
+                    import asyncio
+                    asyncio.create_task(delete_message_after_delay(callback.bot, callback.message.chat.id, error_msg.message_id, 3))
     
     await safe_cart_operation(user_id, callback, increase_operation)
 
@@ -390,7 +417,14 @@ async def cart_decrease(callback: CallbackQuery):
                     logger.info("✅ Карточка товара обновлена в cart_decrease")
                 except Exception as e:
                     logger.warning(f"❌ Не удалось отредактировать карточку товара в cart_decrease: {e}")
-                    await callback.answer("⚠️ Ошибка обновления", show_alert=False)
+                    # Показываем временное сообщение об ошибке
+                    error_msg = await callback.message.answer(
+                        "⚠️ <b>Ошибка обновления товара</b>\n\n"
+                        "Попробуйте обновить страницу",
+                        parse_mode='HTML'
+                    )
+                    import asyncio
+                    asyncio.create_task(delete_message_after_delay(callback.bot, callback.message.chat.id, error_msg.message_id, 3))
     
     await safe_cart_operation(user_id, callback, decrease_operation)
 
@@ -650,7 +684,16 @@ async def cancel_quantity_input(callback: CallbackQuery, state: FSMContext):
     except:
         pass
     
-    await callback.answer("❌ Ввод количества отменен")
+    # Показываем временное сообщение об отмене
+    cancel_msg = await callback.message.answer(
+        "❌ <b>Ввод количества отменен</b>\n\n"
+        "Возвращаемся к корзине...",
+        parse_mode='HTML'
+    )
+    
+    # Удаляем уведомление через 2 секунды
+    import asyncio
+    asyncio.create_task(delete_message_after_delay(callback.bot, callback.message.chat.id, cancel_msg.message_id, 2))
     
     # Возвращаемся к корзине, используя message_manager
     cart_items = await db.get_cart(user_id)

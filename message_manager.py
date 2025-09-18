@@ -14,15 +14,29 @@ class MessageManager:
     
     def __init__(self):
         # Словарь для хранения ID последних сообщений пользователей
-        # user_id -> {'last_message_id': int, 'menu_state': str}
+        # user_id -> {'last_message_id': int, 'menu_state': str, 'message_history': [int]}
         self.user_messages: Dict[int, Dict] = {}
         
     def set_user_message(self, user_id: int, message_id: int, menu_state: str = 'main'):
         """Сохранить ID последнего сообщения пользователя"""
-        self.user_messages[user_id] = {
-            'last_message_id': message_id,
-            'menu_state': menu_state
-        }
+        if user_id not in self.user_messages:
+            self.user_messages[user_id] = {
+                'last_message_id': message_id,
+                'menu_state': menu_state,
+                'message_history': [message_id]
+            }
+        else:
+            # Добавляем в историю и обновляем последнее сообщение
+            history = self.user_messages[user_id].get('message_history', [])
+            if len(history) >= 5:  # Ограничиваем историю 5 сообщениями
+                history = history[-4:]  # Оставляем последние 4
+            history.append(message_id)
+            
+            self.user_messages[user_id].update({
+                'last_message_id': message_id,
+                'menu_state': menu_state,
+                'message_history': history
+            })
         logger.debug(f"Сохранено сообщение {message_id} для пользователя {user_id}, состояние: {menu_state}")
     
     def get_user_message(self, user_id: int) -> Optional[Dict]:
@@ -48,7 +62,29 @@ class MessageManager:
             return True
         except TelegramBadRequest as e:
             logger.warning(f"Не удалось удалить сообщение {user_info['last_message_id']} пользователя {user_id}: {e}")
+            self.clear_user_message(user_id)
             return False
+    
+    async def delete_all_user_messages(self, bot: Bot, user_id: int) -> int:
+        """Удалить все отслеживаемые сообщения пользователя"""
+        user_info = self.get_user_message(user_id)
+        if not user_info:
+            return 0
+            
+        deleted_count = 0
+        message_history = user_info.get('message_history', [])
+        
+        for message_id in message_history:
+            try:
+                await bot.delete_message(user_id, message_id)
+                deleted_count += 1
+                logger.debug(f"Удалено сообщение {message_id} пользователя {user_id}")
+            except TelegramBadRequest as e:
+                logger.debug(f"Не удалось удалить сообщение {message_id} пользователя {user_id}: {e}")
+        
+        self.clear_user_message(user_id)
+        logger.debug(f"Удалено {deleted_count} сообщений пользователя {user_id}")
+        return deleted_count
     
     async def send_or_edit_message(
         self, 
@@ -177,11 +213,15 @@ class MessageManager:
         """
         user_id = callback.from_user.id
         
-        # Всегда удаляем старое и создаем новое сообщение для сохранения нижней клавиатуры
+        # Удаляем все предыдущие сообщения пользователя для предотвращения засорения чата
         try:
+            # Сначала удаляем текущее сообщение callback
             await callback.message.delete()
         except:
             pass
+            
+        # Затем удаляем все отслеживаемые сообщения пользователя
+        await self.delete_all_user_messages(callback.bot, user_id)
         
         # Получаем нижнюю клавиатуру если нужно, или скрываем её
         keyboard_markup = None
