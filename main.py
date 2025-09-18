@@ -198,10 +198,11 @@ async def debug_all_messages(message: Message, state: FSMContext):
 def kill_other_bot_instances():
     """Завершить другие экземпляры бота"""
     if not PSUTIL_AVAILABLE:
-        logger.warning("⚠️ psutil недоступен. Используем альтернативный метод...")
+        logger.warning("⚠️ psutil недоступен. Используем улучшенный альтернативный метод...")
         try:
-            # Альтернативный метод через системные команды
+            # Улучшенный альтернативный метод для Render.com и других серверов
             if sys.platform == "darwin" or sys.platform.startswith("linux"):
+                # Ищем все Python процессы с main.py
                 result = subprocess.run(
                     ["pgrep", "-f", "python.*main.py"], 
                     capture_output=True, 
@@ -210,20 +211,44 @@ def kill_other_bot_instances():
                 if result.stdout:
                     pids = result.stdout.strip().split('\n')
                     current_pid = str(os.getpid())
+                    killed_count = 0
+                    
                     for pid in pids:
                         if pid and pid != current_pid:
-                            logger.info(f"🔪 Завершаем процесс {pid}")
+                            logger.info(f"🔪 Завершаем старый экземпляр бота (PID: {pid})")
+                            # Сначала пробуем мягкое завершение
                             subprocess.run(["kill", "-TERM", pid], capture_output=True)
-                    import time
-                    time.sleep(2)
-                    logger.info("✅ Завершение других процессов выполнено")
+                            killed_count += 1
+                    
+                    if killed_count > 0:
+                        logger.info(f"⏳ Ждем завершения {killed_count} процессов...")
+                        import time
+                        time.sleep(5)  # Увеличили время ожидания
+                        
+                        # Проверяем что процессы завершились
+                        result2 = subprocess.run(
+                            ["pgrep", "-f", "python.*main.py"], 
+                            capture_output=True, 
+                            text=True
+                        )
+                        if result2.stdout:
+                            remaining_pids = [p for p in result2.stdout.strip().split('\n') if p and p != current_pid]
+                            if remaining_pids:
+                                logger.warning(f"🔴 Принудительно завершаем оставшиеся процессы: {remaining_pids}")
+                                for pid in remaining_pids:
+                                    subprocess.run(["kill", "-KILL", pid], capture_output=True)
+                                time.sleep(2)
+                        
+                        logger.info("✅ Завершение других экземпляров выполнено")
+                    else:
+                        logger.info("✅ Других экземпляров не найдено")
                 else:
                     logger.info("✅ Других экземпляров не найдено")
             else:
-                logger.info("💡 Для автоматического завершения установите: pip install psutil")
+                logger.info("💡 Платформа не поддерживается для автоматического завершения")
         except Exception as e:
             logger.warning(f"⚠️ Не удалось завершить другие экземпляры: {e}")
-            logger.info("💡 Для лучшей поддержки установите: pip install psutil")
+            # Даже если не удалось, продолжаем запуск
         return
     
     current_pid = os.getpid()
@@ -308,12 +333,17 @@ async def main():
         from i18n import i18n
         await i18n.load_user_languages_from_db()
         
-        # Удаляем webhook перед началом работы
+        # Удаляем webhook перед началом работы и ждем
         logger.info("Очистка webhook...")
-        await bot.delete_webhook(drop_pending_updates=True)
+        try:
+            await bot.delete_webhook(drop_pending_updates=True)
+            logger.info("✅ Webhook удален")
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка при удалении webhook: {e}")
         
-        # Небольшая задержка для избежания конфликтов
-        await asyncio.sleep(2)
+        # Дополнительная пауза для избежания конфликтов на Render.com
+        logger.info("⏳ Дополнительная пауза для избежания конфликтов...")
+        await asyncio.sleep(5)
         
         # Запуск веб-сервера для Render
         if os.getenv('RENDER'):
