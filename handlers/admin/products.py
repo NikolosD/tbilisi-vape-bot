@@ -19,6 +19,7 @@ class ProductStates(StatesGroup):
     waiting_product_quantity = State()
     waiting_product_photo = State()
     waiting_quantity_input = State()
+    waiting_flavor_selection = State()
 
 @router.callback_query(F.data == "admin_products", admin_filter)
 async def admin_products_menu(callback: CallbackQuery):
@@ -230,13 +231,81 @@ async def select_category_for_product(callback: CallbackQuery, state: FSMContext
     
     await state.update_data(category_id=category_id)
     
+    # Получаем список категорий вкусов (все, не только с товарами)
+    flavor_categories = await db.get_flavor_categories(only_with_products=False)
+    
+    keyboard = []
+    if flavor_categories:
+        for flavor in flavor_categories:
+            emoji = flavor.emoji if flavor.emoji else "🍃"
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"{emoji} {flavor.name}",
+                    callback_data=f"select_flavor_{flavor.id}"
+                )
+            ])
+        keyboard.append([
+            InlineKeyboardButton(text="⏭️ Пропустить вкус", callback_data="skip_flavor_selection")
+        ])
+    else:
+        keyboard.append([
+            InlineKeyboardButton(text="⏭️ Продолжить без вкуса", callback_data="skip_flavor_selection")
+        ])
+    
+    keyboard.append([
+        InlineKeyboardButton(text="🔙 Управление товарами", callback_data="admin_products")
+    ])
+    
+    await callback.message.edit_text(
+        f"➕ <b>Добавление товара</b>\n\n"
+        f"📂 <b>Категория:</b> {category[2]} {category[1]}\n\n"
+        f"🍓 Выберите категорию вкуса для товара:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode='HTML'
+    )
+    await state.set_state(ProductStates.waiting_flavor_selection)
+
+@router.callback_query(F.data.startswith("select_flavor_"), admin_filter)
+async def select_flavor_for_product(callback: CallbackQuery, state: FSMContext):
+    """Выбор вкуса для товара"""
+    flavor_id = int(callback.data.split("_")[2])
+    flavor = await db.get_flavor_category(flavor_id)
+    
+    await state.update_data(flavor_category_id=flavor_id)
+    
+    data = await state.get_data()
+    category = await db.get_category(data['category_id'])
+    
     keyboard = [
         [InlineKeyboardButton(text="🔙 Управление товарами", callback_data="admin_products")]
     ]
     
     await callback.message.edit_text(
         f"➕ <b>Добавление товара</b>\n\n"
-        f"📂 <b>Категория:</b> {category[2]} {category[1]}\n\n"
+        f"📂 <b>Категория:</b> {category[2]} {category[1]}\n"
+        f"🍓 <b>Вкус:</b> {flavor.emoji} {flavor.name}\n\n"
+        f"Напишите название товара:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode='HTML'
+    )
+    await state.set_state(ProductStates.waiting_product_name)
+
+@router.callback_query(F.data == "skip_flavor_selection", admin_filter)
+async def skip_flavor_selection(callback: CallbackQuery, state: FSMContext):
+    """Пропустить выбор вкуса"""
+    await state.update_data(flavor_category_id=None)
+    
+    data = await state.get_data()
+    category = await db.get_category(data['category_id'])
+    
+    keyboard = [
+        [InlineKeyboardButton(text="🔙 Управление товарами", callback_data="admin_products")]
+    ]
+    
+    await callback.message.edit_text(
+        f"➕ <b>Добавление товара</b>\n\n"
+        f"📂 <b>Категория:</b> {category[2]} {category[1]}\n"
+        f"🍓 <b>Вкус:</b> не указан\n\n"
         f"Напишите название товара:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         parse_mode='HTML'
@@ -337,7 +406,8 @@ async def process_product_photo(message: Message, state: FSMContext):
         description=data['description'],
         photo=photo_file_id,
         category_id=data.get('category_id'),
-        stock_quantity=data.get('stock_quantity', 1)
+        stock_quantity=data.get('stock_quantity', 1),
+        flavor_category_id=data.get('flavor_category_id')
     )
     
     await message.answer(
@@ -368,7 +438,8 @@ async def process_product_no_photo(message: Message, state: FSMContext):
         description=data['description'],
         photo=None,
         category_id=data.get('category_id'),
-        stock_quantity=data.get('stock_quantity', 1)
+        stock_quantity=data.get('stock_quantity', 1),
+        flavor_category_id=data.get('flavor_category_id')
     )
     
     await message.answer(

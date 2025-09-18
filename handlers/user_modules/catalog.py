@@ -40,16 +40,37 @@ async def show_category_products(callback: CallbackQuery):
     category_id = int(callback.data.split("_")[1])
     await page_manager.catalog.show_from_callback(callback, category_id=category_id)
 
+@router.callback_query(F.data == "catalog_brands")
+async def callback_catalog_brands(callback: CallbackQuery):
+    """Показать каталог по брендам"""
+    await page_manager.catalog.show_from_callback(callback, catalog_type='brands')
+
+@router.callback_query(F.data == "catalog_flavors")
+async def callback_catalog_flavors(callback: CallbackQuery):
+    """Показать каталог по вкусам"""
+    await page_manager.catalog.show_from_callback(callback, catalog_type='flavors')
+
+@router.callback_query(F.data.startswith("flavor_"))
+async def show_flavor_products(callback: CallbackQuery):
+    """Показать товары выбранного вкуса"""
+    flavor_id = int(callback.data.split("_")[1])
+    await page_manager.catalog.show_from_callback(callback, flavor_id=flavor_id)
+
 @router.callback_query(F.data.startswith("product_"))
 async def show_product(callback: CallbackQuery):
     """Показать карточку товара"""
     data_parts = callback.data.split("_")
     product_id = int(data_parts[1])
     
-    # Проверяем, пришли ли из категории  
+    # Проверяем, пришли ли из категории или вкуса  
     from_category = None
     if len(data_parts) > 3 and data_parts[2] == "from":
-        from_category = int(data_parts[3])
+        if data_parts[3] == "flavor":
+            # Пришли из вкуса - пока что просто показываем товар
+            from_category = None
+        else:
+            # Пришли из обычной категории
+            from_category = int(data_parts[3])
     
     await page_manager.catalog.show_from_callback(callback, product_id=product_id, from_category=from_category)
 

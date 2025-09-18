@@ -488,6 +488,7 @@ def get_enhanced_admin_keyboard(user_id=None):
     keyboard = [
         [InlineKeyboardButton(text=_("admin.all_orders", user_id=user_id), callback_data="admin_all_orders")],
         [InlineKeyboardButton(text=_("admin.products", user_id=user_id), callback_data="admin_products")],
+        [InlineKeyboardButton(text=_("admin.flavors", user_id=user_id), callback_data="admin_flavors")],
         [InlineKeyboardButton(text=_("admin.stats", user_id=user_id), callback_data="admin_stats")],
         [InlineKeyboardButton(text=_("admin.broadcast", user_id=user_id), callback_data="admin_broadcast")],
         [InlineKeyboardButton(text=_("admin.message_client", user_id=user_id), callback_data="admin_message_client")]
@@ -512,4 +513,61 @@ def get_admin_quick_actions_keyboard(order_id, order_status, user_id=None):
         [InlineKeyboardButton(text="📋 Все заказы", callback_data="admin_all_orders")]
     ]
     
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+# Клавиатура выбора типа каталога
+def get_catalog_type_keyboard(user_id=None):
+    """Клавиатура для выбора типа каталога: по вкусам или по брендам"""
+    keyboard = [
+        [InlineKeyboardButton(text=f"🍓 {_('catalog.by_flavors', user_id=user_id)}", callback_data="catalog_flavors")],
+        [InlineKeyboardButton(text=f"🏷️ {_('catalog.by_brands', user_id=user_id)}", callback_data="catalog_brands")],
+        [InlineKeyboardButton(text=_("common.main_menu", user_id=user_id), callback_data="back_to_menu")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+# Клавиатура категорий вкусов
+def get_flavor_categories_keyboard(flavor_categories, user_id=None):
+    """Клавиатура для выбора категории вкуса"""
+    keyboard = []
+    for flavor in flavor_categories:
+        emoji = flavor.emoji if flavor.emoji else "🍃"
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"{emoji} {flavor.name}",
+                callback_data=f"flavor_{flavor.id}"
+            )
+        ])
+    keyboard.append([InlineKeyboardButton(text=_("common.back", user_id=user_id), callback_data="catalog")])
+    keyboard.append([InlineKeyboardButton(text=_("common.main_menu", user_id=user_id), callback_data="back_to_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+# Клавиатура товаров определенного вкуса
+def get_flavor_products_keyboard(products, flavor_id, user_id=None):
+    """Клавиатура для товаров определенного вкуса"""
+    keyboard = []
+    for product in products:
+        # Проверяем, является ли product объектом Product или кортежем
+        if hasattr(product, 'name'):  # Это объект Product
+            name, price, product_id = product.name, product.price, product.id
+            stock_quantity = getattr(product, 'stock_quantity', 0)
+        else:  # Это кортеж (старый формат)
+            name, price, product_id = product[1], product[2], product[0]
+            stock_quantity = 0
+        
+        # Показываем доступное количество (уже учтены резервы в методе get_products_by_flavor)
+        if stock_quantity > 0:
+            stock_text = f" ({stock_quantity} шт.)"
+        else:
+            stock_text = " (нет в наличии)"
+        button_text = f"{name} - {price}₾{stock_text}"
+        
+        keyboard.append([
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"product_{product_id}_from_flavor_{flavor_id}"
+            )
+        ])
+    
+    keyboard.append([InlineKeyboardButton(text=_("common.back", user_id=user_id), callback_data="catalog_flavors")])
+    keyboard.append([InlineKeyboardButton(text=_("common.main_menu", user_id=user_id), callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

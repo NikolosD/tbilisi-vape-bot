@@ -23,6 +23,16 @@ class Category(NamedTuple):
     id: int
     name: str
     emoji: Optional[str]
+
+
+class FlavorCategory(NamedTuple):
+    """Модель категории вкуса"""
+    id: int
+    name: str
+    emoji: Optional[str]
+    description: Optional[str]
+    created_at: datetime
+    updated_at: datetime
     
 
 class Product(NamedTuple):
@@ -36,6 +46,7 @@ class Product(NamedTuple):
     in_stock: bool
     created_at: datetime
     stock_quantity: int
+    flavor_category_id: Optional[int] = None
     
 
 class CartItem(NamedTuple):

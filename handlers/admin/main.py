@@ -17,6 +17,7 @@ from .stats import router as stats_router
 from .security import router as security_router
 from .categories import router as categories_router
 from .communication import router as communication_router
+from .flavors import router as flavors_router
 
 # Основной роутер админки
 router = Router()
@@ -28,6 +29,7 @@ router.include_router(orders_router)
 router.include_router(stats_router)
 router.include_router(security_router)
 router.include_router(categories_router)
+router.include_router(flavors_router)
 
 # Основные состояния админки
 class AdminStates(StatesGroup):

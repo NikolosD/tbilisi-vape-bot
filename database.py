@@ -4,7 +4,7 @@ from datetime import datetime
 import json
 import logging
 from config import DATABASE_URL
-from models import User, Category, Product, CartItem, Order
+from models import User, Category, Product, CartItem, Order, FlavorCategory
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
@@ -107,11 +107,11 @@ class Database:
         return None
     
     # Методы для работы с товарами
-    async def add_product(self, name, price, description, photo=None, category_id=None, stock_quantity=1):
+    async def add_product(self, name, price, description, photo=None, category_id=None, stock_quantity=1, flavor_category_id=None):
         """Добавление товара"""
-        query = """INSERT INTO products (name, price, description, photo, category_id, stock_quantity) 
-                   VALUES ($1, $2, $3, $4, $5, $6)"""
-        await self.execute(query, name, price, description, photo, category_id, stock_quantity)
+        query = """INSERT INTO products (name, price, description, photo, category_id, stock_quantity, flavor_category_id) 
+                   VALUES ($1, $2, $3, $4, $5, $6, $7)"""
+        await self.execute(query, name, price, description, photo, category_id, stock_quantity, flavor_category_id)
     
     async def get_products(self, category_id=None):
         """Получение списка товаров"""
@@ -131,10 +131,20 @@ class Database:
             return await self.fetchall(query)
     
     async def get_products_by_category(self, category_id):
-        """Получение товаров по категории (только те, что в наличии)"""
-        query = """SELECT * FROM products 
-                   WHERE category_id = $1 AND in_stock = true AND stock_quantity > 0
-                   ORDER BY id"""
+        """Получение товаров по категории с учетом резервов"""
+        await self.cleanup_expired_reservations()
+        
+        query = """
+        SELECT p.*, 
+               p.stock_quantity - COALESCE(SUM(c.quantity), 0) as available_quantity
+        FROM products p
+        LEFT JOIN cart c ON p.id = c.product_id AND c.reserved_until > CURRENT_TIMESTAMP
+        WHERE p.category_id = $1 AND p.in_stock = true
+        GROUP BY p.id, p.name, p.price, p.description, p.photo, p.category_id, 
+                 p.in_stock, p.created_at, p.stock_quantity, p.flavor_category_id
+        HAVING p.stock_quantity - COALESCE(SUM(c.quantity), 0) > 0
+        ORDER BY p.id
+        """
         rows = await self.fetchall(query, category_id)
         return [
             Product(
@@ -146,7 +156,8 @@ class Database:
                 category_id=row['category_id'],
                 in_stock=row['in_stock'],
                 created_at=row['created_at'],
-                stock_quantity=row['stock_quantity']
+                stock_quantity=row['available_quantity'],  # Используем доступное количество
+                flavor_category_id=row.get('flavor_category_id')
             ) for row in rows
         ]
     
@@ -164,7 +175,8 @@ class Database:
                 category_id=row['category_id'],
                 in_stock=row['in_stock'],
                 created_at=row['created_at'],
-                stock_quantity=row['stock_quantity']
+                stock_quantity=row['stock_quantity'],
+                flavor_category_id=row.get('flavor_category_id')
             ) for row in rows
         ]
     
@@ -182,7 +194,8 @@ class Database:
                 category_id=row['category_id'],
                 in_stock=row['in_stock'],
                 created_at=row['created_at'],
-                stock_quantity=row['stock_quantity']
+                stock_quantity=row['stock_quantity'],
+                flavor_category_id=row.get('flavor_category_id')
             )
         return None
     
@@ -210,6 +223,109 @@ class Database:
         WHERE id = $2
         """
         await self.execute(query, quantity, product_id)
+    
+    # Методы для работы с категориями вкусов
+    async def get_flavor_categories(self, only_with_products=False) -> List[FlavorCategory]:
+        """Получение всех категорий вкусов"""
+        if only_with_products:
+            # Показывать только категории с товарами в наличии
+            query = """
+            SELECT DISTINCT fc.* 
+            FROM flavor_categories fc 
+            INNER JOIN products p ON fc.id = p.flavor_category_id 
+            WHERE p.in_stock = true 
+            ORDER BY fc.name
+            """
+        else:
+            query = "SELECT * FROM flavor_categories ORDER BY name"
+            
+        rows = await self.fetchall(query)
+        return [
+            FlavorCategory(
+                id=row['id'],
+                name=row['name'],
+                emoji=row['emoji'],
+                description=row['description'],
+                created_at=row['created_at'],
+                updated_at=row['updated_at']
+            ) for row in rows
+        ]
+    
+    async def get_flavor_category(self, category_id: int) -> Optional[FlavorCategory]:
+        """Получение категории вкуса по ID"""
+        query = "SELECT * FROM flavor_categories WHERE id = $1"
+        row = await self.fetchone(query, category_id)
+        if row:
+            return FlavorCategory(
+                id=row['id'],
+                name=row['name'],
+                emoji=row['emoji'],
+                description=row['description'],
+                created_at=row['created_at'],
+                updated_at=row['updated_at']
+            )
+        return None
+    
+    async def add_flavor_category(self, name: str, emoji: str = '', description: str = '') -> int:
+        """Добавление новой категории вкуса"""
+        query = """
+        INSERT INTO flavor_categories (name, emoji, description) 
+        VALUES ($1, $2, $3) 
+        RETURNING id
+        """
+        return await self.fetchval(query, name, emoji, description)
+    
+    async def update_flavor_category(self, category_id: int, name: str, emoji: str = '', description: str = ''):
+        """Обновление категории вкуса"""
+        query = """
+        UPDATE flavor_categories 
+        SET name = $1, emoji = $2, description = $3, updated_at = CURRENT_TIMESTAMP 
+        WHERE id = $4
+        """
+        await self.execute(query, name, emoji, description, category_id)
+    
+    async def delete_flavor_category(self, category_id: int):
+        """Удаление категории вкуса"""
+        # Сначала убираем связи у всех товаров
+        await self.execute("UPDATE products SET flavor_category_id = NULL WHERE flavor_category_id = $1", category_id)
+        # Затем удаляем категорию
+        await self.execute("DELETE FROM flavor_categories WHERE id = $1", category_id)
+    
+    async def get_products_by_flavor(self, flavor_category_id: int) -> List[Product]:
+        """Получение всех товаров определенного вкуса с учетом резервов"""
+        await self.cleanup_expired_reservations()
+        
+        query = """
+        SELECT p.*, 
+               p.stock_quantity - COALESCE(SUM(c.quantity), 0) as available_quantity
+        FROM products p
+        LEFT JOIN cart c ON p.id = c.product_id AND c.reserved_until > CURRENT_TIMESTAMP
+        WHERE p.flavor_category_id = $1 AND p.in_stock = true
+        GROUP BY p.id, p.name, p.price, p.description, p.photo, p.category_id, 
+                 p.in_stock, p.created_at, p.stock_quantity, p.flavor_category_id
+        HAVING p.stock_quantity - COALESCE(SUM(c.quantity), 0) > 0
+        ORDER BY p.name
+        """
+        rows = await self.fetchall(query, flavor_category_id)
+        return [
+            Product(
+                id=row['id'],
+                name=row['name'],
+                price=row['price'],
+                description=row['description'],
+                photo=row['photo'],
+                category_id=row['category_id'],
+                in_stock=row['in_stock'],
+                created_at=row['created_at'],
+                stock_quantity=row['available_quantity'],  # Используем доступное количество
+                flavor_category_id=row.get('flavor_category_id')
+            ) for row in rows
+        ]
+    
+    async def update_product_flavor(self, product_id: int, flavor_category_id: Optional[int]):
+        """Обновление категории вкуса у товара"""
+        query = "UPDATE products SET flavor_category_id = $1 WHERE id = $2"
+        await self.execute(query, flavor_category_id, product_id)
     
     # Методы для работы с корзиной
     async def add_to_cart(self, user_id, product_id, quantity=1):
