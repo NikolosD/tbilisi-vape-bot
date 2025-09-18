@@ -115,8 +115,49 @@ def get_category_products_keyboard(products, category_id, user_id=None):
     keyboard.append([InlineKeyboardButton(text=_("common.to_categories", user_id=user_id), callback_data="catalog")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+# Асинхронная версия клавиатуры товаров с учетом резервов
+async def get_category_products_keyboard_with_stock(products, category_id, user_id=None):
+    from database import db
+    
+    keyboard = []
+    for product in products:
+        # Проверяем, является ли product объектом Product или кортежем
+        if hasattr(product, 'name'):  # Это объект Product
+            name, price, product_id = product.name, product.price, product.id
+            in_stock = getattr(product, 'in_stock', True)
+        else:  # Это кортеж (старый формат)
+            name, price, product_id = product[1], product[2], product[0]
+            in_stock = True
+        
+        # Получаем доступное количество с учетом резервов
+        if in_stock:
+            available_quantity = await db.get_available_product_quantity(product_id)
+            if available_quantity > 0:
+                button_text = f"{name} - {price}₾ (📦 {available_quantity} {_('product.pieces', user_id=user_id)})"
+            else:
+                button_text = f"{name} - {price}₾ (❌ {_('product.out_of_stock', user_id=user_id)})"
+        else:
+            button_text = f"{name} - {price}₾ (❌ {_('product.out_of_stock', user_id=user_id)})"
+            
+        keyboard.append([
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"product_{product_id}_from_{category_id}"
+            )
+        ])
+    keyboard.append([InlineKeyboardButton(text=_("common.to_categories", user_id=user_id), callback_data="catalog")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
 # Карточка товара
 def get_product_card_keyboard(product_id, in_cart=False, from_category=None):
+    # Определяем куда должна вести кнопка "Назад"
+    back_callback = f"category_{from_category}" if from_category else "catalog"
+    
+    # Определяем callback_data для добавления в корзину с учетом from_category
+    add_to_cart_callback = f"add_to_cart_{product_id}"
+    if from_category:
+        add_to_cart_callback += f"_from_{from_category}"
+    
     if in_cart:
         keyboard = [
             [
@@ -127,16 +168,16 @@ def get_product_card_keyboard(product_id, in_cart=False, from_category=None):
             [InlineKeyboardButton(text=_("product.remove_from_cart"), callback_data=f"cart_remove_{product_id}")],
             [
                 InlineKeyboardButton(text=_("menu.cart"), callback_data="cart"),
-                InlineKeyboardButton(text=_("common.back"), callback_data=f"category_{from_category}" if from_category else "catalog")
+                InlineKeyboardButton(text=_("common.back"), callback_data=back_callback)
             ],
             [InlineKeyboardButton(text=_("common.to_catalog"), callback_data="catalog")]
         ]
     else:
         keyboard = [
-            [InlineKeyboardButton(text=_("product.add_to_cart"), callback_data=f"add_to_cart_{product_id}")],
+            [InlineKeyboardButton(text=_("product.add_to_cart"), callback_data=add_to_cart_callback)],
             [
                 InlineKeyboardButton(text=_("menu.cart"), callback_data="cart"),
-                InlineKeyboardButton(text=_("common.back"), callback_data=f"category_{from_category}" if from_category else "catalog")
+                InlineKeyboardButton(text=_("common.back"), callback_data=back_callback)
             ],
             [InlineKeyboardButton(text=_("common.to_catalog"), callback_data="catalog")]
         ]
@@ -179,7 +220,8 @@ def get_location_request_keyboard(user_id=None):
         [KeyboardButton(text=_("checkout.manual_address", user_id=user_id))],
         [KeyboardButton(text="🗺️ Отправить точку на карте")]
     ]
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True, one_time_keyboard=True)
+    # Убираем one_time_keyboard=True чтобы клавиатура не исчезала
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True, one_time_keyboard=False)
 
 # Inline клавиатура для геолокации
 def get_location_inline_keyboard(user_id=None):
@@ -519,4 +561,17 @@ def get_orders_filter_keyboard(user_id=None):
         [InlineKeyboardButton(text=f"📋 {_('admin.all_orders', user_id=user_id)}", callback_data="filter_all")],
         [InlineKeyboardButton(text=_("common.to_admin", user_id=user_id), callback_data="admin_panel")]
     ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_admin_quick_actions_keyboard(order_id, order_status, user_id=None):
+    """Клавиатура с быстрыми действиями админа для уведомлений о заказах"""
+    keyboard = [
+        [
+            InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"quick_confirm_{order_id}"),
+            InlineKeyboardButton(text="❌ Отклонить оплату", callback_data=f"quick_reject_with_reason_{order_id}")
+        ],
+        [InlineKeyboardButton(text="💬 Написать клиенту", callback_data=f"quick_message_{order_id}")],
+        [InlineKeyboardButton(text="📋 Все заказы", callback_data="admin_all_orders")]
+    ]
+    
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

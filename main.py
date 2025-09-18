@@ -12,7 +12,7 @@ except ImportError:
     PSUTIL_AVAILABLE = False
     logging.warning("⚠️ psutil не установлен. Автоматическое завершение других экземпляров недоступно.")
 
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
@@ -29,6 +29,7 @@ from admin_management import router as admin_management_router
 from i18n import _
 from middleware import AntiSpamMiddleware
 from anti_spam import anti_spam
+from reservation_scheduler import reservation_scheduler
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -46,10 +47,16 @@ anti_spam.set_admin_ids(ADMIN_IDS)
 dp.message.middleware(AntiSpamMiddleware())
 dp.callback_query.middleware(AntiSpamMiddleware())
 
+# Создаем отдельный роутер для отладки
+debug_router = Router()
+
 # Подключение роутеров
 dp.include_router(user_router)
 dp.include_router(admin_management_router)  # Важно: подключаем ДО admin_router
 dp.include_router(admin_router)
+
+# Подключаем debug_router ПОСЛЕДНИМ чтобы он не перехватывал сообщения
+dp.include_router(debug_router)
 
 # ReplyKeyboard убран - теперь используем только inline кнопки
 
@@ -171,29 +178,35 @@ async def cmd_help(message: Message):
     await message.answer(help_text, parse_mode='HTML')
 
 # ТЕСТОВЫЙ обработчик рассылки в main.py (ВРЕМЕННО)
-@dp.message()
-async def debug_all_messages(message: Message, state: FSMContext):
-    """Глобальный обработчик для отладки всех сообщений"""
-    from config import ADMIN_IDS
-    
-    # ReplyKeyboard больше не используется - все кнопки inline
-    
-    # Логируем только сообщения от админов для уменьшения спама
-    if message.from_user.id in ADMIN_IDS:
-        current_state = await state.get_state()
-        data = await state.get_data()
-        print(f"🌐 GLOBAL DEBUG: Unhandled admin message from {message.from_user.id}")
-        print(f"    Text: '{message.text}'")
-        print(f"    State: {current_state}")
-        print(f"    Data: {data}")
-        
-        # Используем красивую логику рассылки из communication.py
-        if current_state and 'waiting_broadcast_message' in str(current_state):
-            print(f"🚀 BEAUTIFUL BROADCAST: Processing broadcast with branding!")
-            
-            from handlers.admin.communication import process_broadcast_logic
-            await process_broadcast_logic(message, state)
-            return
+# ВРЕМЕННО ОТКЛЮЧЕН глобальный обработчик для отладки
+# @debug_router.message()
+# async def debug_all_messages(message: Message, state: FSMContext):
+#     """Глобальный обработчик для отладки всех сообщений"""
+#     from config import ADMIN_IDS
+#     
+#     # ReplyKeyboard больше не используется - все кнопки inline
+#     
+#     # Логируем только сообщения от админов для уменьшения спама
+#     if message.from_user.id in ADMIN_IDS:
+#         current_state = await state.get_state()
+#         data = await state.get_data()
+#         
+#         # Пропускаем сообщения, которые должны обрабатываться в состояниях корзины
+#         if current_state and 'CartStates:waiting_cart_quantity_input' in str(current_state):
+#             return
+#         
+#         print(f"🌐 GLOBAL DEBUG: Unhandled admin message from {message.from_user.id}")
+#         print(f"    Text: '{message.text}'")
+#         print(f"    State: {current_state}")
+#         print(f"    Data: {data}")
+#         
+#         # Используем красивую логику рассылки из communication.py
+#         if current_state and 'waiting_broadcast_message' in str(current_state):
+#             print(f"🚀 BEAUTIFUL BROADCAST: Processing broadcast with branding!")
+#             
+#             from handlers.admin.communication import process_broadcast_logic
+#             await process_broadcast_logic(message, state)
+#             return
 
 def kill_other_bot_instances():
     """Завершить другие экземпляры бота"""
@@ -295,6 +308,12 @@ async def shutdown_handler():
     """Обработчик корректного завершения работы"""
     logger.info("Получен сигнал завершения работы...")
     try:
+        # Останавливаем планировщик резервирования
+        await reservation_scheduler.stop()
+        logger.info("Планировщик резервирования остановлен")
+    except:
+        pass
+    try:
         await db.close_pool()
     except:
         pass
@@ -332,6 +351,10 @@ async def main():
         logger.info("Загрузка языков пользователей...")
         from i18n import i18n
         await i18n.load_user_languages_from_db()
+        
+        # Запускаем планировщик резервирования
+        logger.info("Запуск планировщика резервирования товаров...")
+        await reservation_scheduler.start()
         
         # Удаляем webhook перед началом работы и ждем
         logger.info("Очистка webhook...")

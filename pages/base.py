@@ -62,7 +62,8 @@ class BasePage(ABC):
             page_data.get('text', ''),
             reply_markup=page_data.get('keyboard'),
             menu_state=self.menu_state,
-            photo=page_data.get('photo')
+            photo=page_data.get('photo'),
+            hide_reply_keyboard=page_data.get('hide_reply_keyboard', False)
         )
     
     def get_title(self, user_id: int) -> str:

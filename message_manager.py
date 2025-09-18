@@ -161,6 +161,7 @@ class MessageManager:
         parse_mode: str = 'HTML',
         menu_state: str = 'main',
         send_reply_keyboard: bool = False,
+        hide_reply_keyboard: bool = False,
         photo: str = None
     ):
         """
@@ -182,10 +183,13 @@ class MessageManager:
         except:
             pass
         
-        # Получаем нижнюю клавиатуру если нужно
+        # Получаем нижнюю клавиатуру если нужно, или скрываем её
         keyboard_markup = None
         if send_reply_keyboard:
             keyboard_markup = await self._get_reply_keyboard(user_id)
+        elif hide_reply_keyboard:
+            from aiogram.types import ReplyKeyboardRemove
+            keyboard_markup = ReplyKeyboardRemove()
             
         # Отправляем сообщение с фото или без
         if photo:

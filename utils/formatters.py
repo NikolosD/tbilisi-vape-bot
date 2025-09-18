@@ -6,7 +6,7 @@ from typing import List, Optional
 from i18n import _
 
 
-def format_product_card(product, quantity_in_cart: int = 0, user_id: Optional[int] = None) -> str:
+async def format_product_card(product, quantity_in_cart: int = 0, user_id: Optional[int] = None) -> str:
     """
     Format product information for display
     
@@ -18,6 +18,8 @@ def format_product_card(product, quantity_in_cart: int = 0, user_id: Optional[in
     Returns:
         Formatted product text string
     """
+    from database import db
+    
     text = f"🛍️ <b>{product.name}</b>\n\n"
     
     if product.description:
@@ -25,9 +27,13 @@ def format_product_card(product, quantity_in_cart: int = 0, user_id: Optional[in
     
     text += f"💰 <b>{_('product.price', user_id=user_id)}</b> {product.price}₾\n"
     
-    # Stock information
-    if product.in_stock and product.stock_quantity > 0:
-        text += f"📦 <b>{_('product.in_stock', user_id=user_id)}:</b> {product.stock_quantity} {_('product.pieces', user_id=user_id)}\n"
+    # Stock information with reservations
+    if product.in_stock:
+        available_quantity = await db.get_available_product_quantity(product.id)
+        if available_quantity > 0:
+            text += f"📦 <b>{_('product.in_stock', user_id=user_id)}:</b> {available_quantity} {_('product.pieces', user_id=user_id)}\n"
+        else:
+            text += f"❌ <b>{_('product.out_of_stock', user_id=user_id)}</b>\n"
     else:
         text += f"❌ <b>{_('product.out_of_stock', user_id=user_id)}</b>\n"
     
@@ -105,7 +111,7 @@ def format_order_details(order, order_items: List, user_id: Optional[int] = None
     return text
 
 
-def format_product_list_item(product, category_id: Optional[int] = None, user_id: Optional[int] = None) -> str:
+async def format_product_list_item(product, category_id: Optional[int] = None, user_id: Optional[int] = None) -> str:
     """
     Format product for list display (in category view)
     
@@ -117,7 +123,13 @@ def format_product_list_item(product, category_id: Optional[int] = None, user_id
     Returns:
         Formatted product list item text
     """
-    if product.stock_quantity > 0:
-        return f"{product.name} - {product.price}₾ (📦 {product.stock_quantity} {_('product.pieces', user_id=user_id)})"
+    from database import db
+    
+    if product.in_stock:
+        available_quantity = await db.get_available_product_quantity(product.id)
+        if available_quantity > 0:
+            return f"{product.name} - {product.price}₾ (📦 {available_quantity} {_('product.pieces', user_id=user_id)})"
+        else:
+            return f"{product.name} - {product.price}₾ (❌ {_('product.out_of_stock', user_id=user_id)})"
     else:
         return f"{product.name} - {product.price}₾ (❌ {_('product.out_of_stock', user_id=user_id)})"

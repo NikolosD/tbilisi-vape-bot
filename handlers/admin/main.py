@@ -91,7 +91,54 @@ async def process_admin_message(message: Message, state: FSMContext):
     """Обработка сообщений от админа в зависимости от состояния"""
     current_state = await state.get_state()
     
-    # Проверяем специфичные состояния из подмодулей
+    # Специальная обработка для отклонения платежа
+    if current_state == "OrderStates:waiting_rejection_reason":
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        from i18n import _
+        
+        data = await state.get_data()
+        reason = message.text
+        
+        order_id = data.get('order_id')
+        order_number = data.get('order_number')
+        user_id = data.get('user_id')
+        total_price = data.get('total_price')
+        user_lang = data.get('user_lang', 'ru')
+        
+        if order_id and user_id:
+            from database import db
+            await db.update_order_status(order_id, 'waiting_payment')
+            
+            message_text = _("admin.payment_rejected", user_id=user_id, 
+                            order_number=order_number, 
+                            total_price=total_price,
+                            reason=reason)
+            
+            resend_text = _("admin.resend_screenshot", user_id=user_id)
+            contact_text = _("admin.contact_support", user_id=user_id)
+            menu_text = _("common.main_menu", user_id=user_id)
+            
+            try:
+                await message.bot.send_message(
+                    user_id,
+                    message_text,
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text=resend_text, callback_data=f"resend_screenshot_{order_number}")],
+                        [InlineKeyboardButton(text=contact_text, callback_data="contact")],
+                        [InlineKeyboardButton(text=menu_text, callback_data="back_to_menu")]
+                    ]),
+                    parse_mode='HTML'
+                )
+                await message.answer("✅ Сообщение об отклонении отправлено пользователю!")
+            except Exception as e:
+                await message.answer(f"❌ Ошибка отправки сообщения: {str(e)}")
+        else:
+            await message.answer("❌ Ошибка: данные заказа не найдены")
+        
+        await state.clear()
+        return
+    
+    # Проверяем другие специфичные состояния из подмодулей
     if current_state in [
         "ProductStates:waiting_quantity_input", 
         "OrderStates:waiting_order_search",
@@ -99,7 +146,6 @@ async def process_admin_message(message: Message, state: FSMContext):
         "CommunicationStates:waiting_client_message", 
         "CommunicationStates:waiting_client_id",
         "CommunicationStates:waiting_general_client_message",
-        "OrderStates:waiting_rejection_reason",
         "CategoryStates:waiting_category_name",
         "CategoryStates:waiting_category_emoji", 
         "CategoryStates:waiting_category_description",

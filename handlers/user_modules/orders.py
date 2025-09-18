@@ -11,7 +11,8 @@ from models import OrderStatus
 from message_manager import message_manager
 from keyboards import (
     get_location_request_keyboard, get_order_confirmation_keyboard,
-    get_order_details_keyboard, get_payment_notification_keyboard
+    get_order_details_keyboard, get_payment_notification_keyboard,
+    get_admin_quick_actions_keyboard
 )
 from i18n import _
 from button_filters import is_orders_button
@@ -68,14 +69,26 @@ async def start_checkout(callback: CallbackQuery, state: FSMContext):
     
     print(f"DEBUG: Пользователь {user_id} начал checkout, отправляем Reply клавиатуру")
     
+    # Отправляем единое сообщение с расширенным текстом
+    combined_text = _("checkout.location_request", user_id=user_id).format(total=total) + "\n\n👆 Выберите способ выше или используйте кнопки ниже:"
+    
     location_request_msg = await callback.message.answer(
-        _("checkout.location_request", user_id=user_id).format(total=total),
+        combined_text,
         reply_markup=get_location_request_keyboard(user_id=user_id),
         parse_mode='HTML'
     )
     
+    # Отправляем inline кнопки навигации отдельно (они будут под сообщением)
+    navigation_msg = await callback.message.answer(
+        "🔽 Навигация:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад к корзине", callback_data="cart")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
+        ])
+    )
+    
     await state.set_state(OrderStates.waiting_location)
-    await state.update_data(total=total, location_request_msg_id=location_request_msg.message_id)
+    await state.update_data(total=total, location_request_msg_id=location_request_msg.message_id, navigation_msg_id=navigation_msg.message_id)
     
     print(f"DEBUG: Состояние установлено на waiting_location для пользователя {user_id}")
 
@@ -137,38 +150,68 @@ async def handle_manual_address_text(message: Message, state: FSMContext):
     """Обработка нажатия кнопки 'Ввести адрес вручную' в Reply клавиатуре"""
     user_id = message.from_user.id
     
+    print(f"🚀 DEBUG: ВХОД В ОБРАБОТЧИК handle_manual_address_text")
     print(f"DEBUG: Получен текст от пользователя {user_id}: '{message.text}'")
     
     # Проверяем, что это именно кнопка "Ввести адрес вручную"
-    if message.text == _("checkout.manual_address", user_id=user_id):
-        # Удаляем сообщение пользователя с кнопкой
+    # Проверяем и локализованный текст, и прямой текст кнопки
+    manual_address_text = _("checkout.manual_address", user_id=user_id)
+    print(f"DEBUG: Ожидаемый текст кнопки: '{manual_address_text}'")
+    print(f"DEBUG: Полученный текст: '{message.text}'")
+    print(f"DEBUG: Совпадение: {message.text == manual_address_text}")
+    
+    if message.text == manual_address_text or message.text == "✍️ Ввести адрес вручную":
+        # НЕ удаляем сообщение пользователя сразу
+        
+        # Убираем Reply клавиатуру и отправляем единое сообщение с запросом адреса и кнопками
+        enter_address_msg = await message.answer(
+            "📝 <b>Ввод адреса доставки</b>\n\n"
+            "Введите полный адрес доставки в следующем сообщении.\n"
+            "Например: ул. Руставели 25, кв. 10\n\n"
+            "👇 Или выберите действие:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="checkout")],
+                [InlineKeyboardButton(text="🛒 Корзина", callback_data="cart")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
+            ]),
+            parse_mode='HTML'
+        )
+        
+        # Теперь у нас только одно сообщение
+        nav_msg = enter_address_msg
+        
+        # Теперь удаляем сообщение пользователя
         try:
             await message.delete()
         except:
             pass
         
-        # Убираем Reply клавиатуру и отправляем сообщение с запросом адреса
-        enter_address_msg = await message.answer(
-            _("checkout.enter_address", user_id=user_id),
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode='HTML'
-        )
-        
-        address_msg = await message.answer(
-            "👆 Введите адрес в следующем сообщении:",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text=_("common.back", user_id=user_id), callback_data="cart")]
-            ])
-        )
-        
-        # Получаем существующие данные и сохраняем ID обоих сообщений для последующего удаления
+        # Получаем существующие данные для удаления предыдущих сообщений
         data = await state.get_data()
+        location_request_msg_id = data.get('location_request_msg_id')
+        navigation_msg_id = data.get('navigation_msg_id')
+        
+        # Удаляем предыдущие сообщения
+        if location_request_msg_id:
+            try:
+                await message.bot.delete_message(chat_id=user_id, message_id=location_request_msg_id)
+            except Exception:
+                pass  # Сообщение могло быть уже удалено
+        
+        if navigation_msg_id:
+            try:
+                await message.bot.delete_message(chat_id=user_id, message_id=navigation_msg_id)
+            except Exception:
+                pass  # Навигационное сообщение могло быть уже удалено
+        
+        # Сохраняем ID нового сообщения для последующего удаления
         await state.update_data(
             enter_address_msg_id=enter_address_msg.message_id,
-            address_msg_id=address_msg.message_id
+            address_msg_id=nav_msg.message_id
         )
         
         await state.set_state(OrderStates.waiting_address)
+        print(f"DEBUG: Состояние изменено на waiting_address для пользователя {user_id}")
     elif message.text == "🗺️ Отправить точку на карте":
         # Удаляем сообщение пользователя с кнопкой
         try:
@@ -187,21 +230,60 @@ async def handle_manual_address_text(message: Message, state: FSMContext):
             parse_mode='HTML'
         )
         
-        # Получаем существующие данные и сохраняем ID сообщения для последующего удаления
+        # Получаем существующие данные для удаления предыдущих сообщений
         data = await state.get_data()
+        location_request_msg_id = data.get('location_request_msg_id')
+        navigation_msg_id = data.get('navigation_msg_id')
+        
+        # Удаляем предыдущие сообщения
+        if location_request_msg_id:
+            try:
+                await message.bot.delete_message(chat_id=user_id, message_id=location_request_msg_id)
+            except Exception:
+                pass  # Сообщение могло быть уже удалено
+        
+        if navigation_msg_id:
+            try:
+                await message.bot.delete_message(chat_id=user_id, message_id=navigation_msg_id)
+            except Exception:
+                pass  # Навигационное сообщение могло быть уже удалено
+        
+        # Сохраняем ID нового сообщения для последующего удаления
         await state.update_data(location_instruction_msg_id=location_instruction_msg.message_id)
     else:
+        print(f"DEBUG: Текст '{message.text}' не совпал с известными кнопками")
+        
+        # Проверяем, может это прямой ввод адреса
+        # Если текст не является кнопкой, обрабатываем как адрес
+        if len(message.text) > 5 and not message.text.startswith("📍") and not message.text.startswith("🗺️"):
+            print(f"DEBUG: Обрабатываем как прямой ввод адреса")
+            # Переводим в состояние ожидания адреса и обрабатываем
+            await state.set_state(OrderStates.waiting_address)
+            await process_address(message, state)
+            return
+        
         # Удаляем сообщение пользователя с произвольным текстом
         try:
             await message.delete()
         except:
             pass
         
-        # Если это не кнопка, а произвольный текст, возможно это адрес
+        # Если это не кнопка и не адрес, показываем предупреждение
+        # Сначала отправляем предупреждение без клавиатуры
+        warning_msg = await message.answer(
+            "⚠️ Пожалуйста, используйте кнопки ниже или отправьте геолокацию через меню 📎"
+        )
+        
+        # Затем отправляем сообщение с клавиатурой
         await message.answer(
-            "📍 Пожалуйста, используйте кнопки ниже или отправьте геолокацию:",
+            "📍 Выберите способ указания адреса:",
             reply_markup=get_location_request_keyboard(user_id=user_id)
         )
+        
+        # Удаляем только предупреждение через 5 секунд
+        import asyncio
+        from handlers.user_modules.cart import delete_message_after_delay
+        asyncio.create_task(delete_message_after_delay(message.bot, message.chat.id, warning_msg.message_id, 5))
 
 # Обработчик для старой inline кнопки (оставим для совместимости)
 @router.callback_query(F.data == "manual_address")
@@ -212,7 +294,9 @@ async def manual_address(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         _("checkout.enter_address", user_id=user_id),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=_("common.back", user_id=user_id), callback_data="cart")]
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="checkout")],
+            [InlineKeyboardButton(text="🛒 Корзина", callback_data="cart")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
         ]),
         parse_mode='HTML'
     )
@@ -255,6 +339,17 @@ async def process_address(message: Message, state: FSMContext):
     # Отладочная информация
     logger.info(f"Получен адрес: {address} от пользователя {user_id}")
     
+    # Убираем Reply клавиатуру и показываем загрузку
+    loading_msg = await message.answer(
+        "⏳ <b>Обрабатываем ваш заказ...</b>\n\n"
+        "🔄 Создание заказа\n"
+        "💳 Подготовка реквизитов\n"
+        "📦 Резервирование товаров\n\n"
+        "Пожалуйста, подождите...",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode='HTML'
+    )
+    
     # Получаем данные из состояния
     data = await state.get_data()
     logger.info(f"Данные состояния: {data}")
@@ -266,6 +361,7 @@ async def process_address(message: Message, state: FSMContext):
     location_map_msg_id = data.get('location_map_msg_id')
     location_request_msg_id = data.get('location_request_msg_id')
     location_instruction_msg_id = data.get('location_instruction_msg_id')
+    navigation_msg_id = data.get('navigation_msg_id')
     
     if location_msg_id:
         try:
@@ -303,15 +399,35 @@ async def process_address(message: Message, state: FSMContext):
         except Exception:
             pass  # Сообщение с инструкцией геопозиции могло быть уже удалено
     
+    if navigation_msg_id:
+        try:
+            await message.bot.delete_message(chat_id=user_id, message_id=navigation_msg_id)
+        except Exception:
+            pass  # Навигационное сообщение могло быть уже удалено
+    
     # Удаляем сообщение пользователя с адресом
     try:
         await message.delete()
     except Exception:
         pass
     
+    # НЕ удаляем сообщение загрузки здесь - оно будет удалено позже
+    
     # Проверяем есть ли общая сумма
     if 'total' not in data:
-        await message.answer(_("common.error"))
+        # Удаляем сообщение загрузки
+        try:
+            await loading_msg.delete()
+        except Exception:
+            pass
+        
+        await message.answer(
+            "❌ Произошла ошибка. Пожалуйста, начните заново.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🛒 Корзина", callback_data="cart")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
+            ])
+        )
         await state.clear()
         return
     
@@ -330,7 +446,19 @@ async def process_address(message: Message, state: FSMContext):
     
     if not cart_items:
         logger.warning(f"Корзина пуста для пользователя {user_id}")
-        await message.answer(_("cart.empty"))
+        # Удаляем сообщение загрузки
+        try:
+            await loading_msg.delete()
+        except Exception:
+            pass
+        
+        await message.answer(
+            "🛒 Корзина пуста. Добавьте товары для оформления заказа.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📦 Каталог", callback_data="catalog")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
+            ])
+        )
         await state.clear()
         return
     
@@ -355,6 +483,12 @@ async def process_address(message: Message, state: FSMContext):
         user = await db.get_user(user_id)
         if not user:
             logger.error(f"Не удалось создать пользователя {user_id}")
+            # Удаляем сообщение загрузки
+            try:
+                await loading_msg.delete()
+            except Exception:
+                pass
+            
             await message.answer("❌ Ошибка: не удалось создать пользователя. Попробуйте /start")
             await state.clear()
             return
@@ -395,7 +529,19 @@ async def process_address(message: Message, state: FSMContext):
         logger.info(f"Заказ создан с номером: {order_id}")
     except Exception as e:
         logger.error(f"Ошибка создания заказа: {e}", exc_info=True)
-        await message.answer("❌ Ошибка при создании заказа. Попробуйте еще раз.")
+        # Удаляем сообщение загрузки
+        try:
+            await loading_msg.delete()
+        except Exception:
+            pass
+        
+        await message.answer(
+            "❌ Ошибка при создании заказа. Попробуйте еще раз.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🛒 Корзина", callback_data="cart")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
+            ])
+        )
         await state.clear()
         return
     
@@ -440,6 +586,12 @@ async def process_address(message: Message, state: FSMContext):
     # Удаляем предыдущее сообщение с запросом адреса
     try:
         await message_manager.delete_user_message(message.bot, user_id)
+    except Exception:
+        pass
+    
+    # Удаляем сообщение загрузки перед отправкой финального сообщения
+    try:
+        await loading_msg.delete()
     except Exception:
         pass
     
@@ -613,7 +765,7 @@ async def process_payment_screenshot(message: Message, state: FSMContext):
                 admin_id,
                 photo=photo_file_id,
                 caption=admin_text,
-                reply_markup=get_payment_notification_keyboard(order.id),
+                reply_markup=get_admin_quick_actions_keyboard(order.id, 'payment_check'),
                 parse_mode='HTML'
             )
             logger.info(f"✅ Уведомление успешно отправлено админу {admin_id}")
@@ -671,10 +823,8 @@ async def cancel_order(callback: CallbackQuery):
         await callback.answer("❌ Заказ нельзя отменить", show_alert=True)
         return
     
-    # Возвращаем товары на склад
-    products = json.loads(order.products)
-    for product in products:
-        await db.increase_product_quantity(product['id'], product['quantity'])
+    # Товары НЕ возвращаем, так как они не списывались при создании заказа
+    # Списание происходит только при подтверждении платежа админом
     
     # Отменяем заказ
     await db.update_order_status(order.id, 'cancelled')

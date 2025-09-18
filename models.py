@@ -45,6 +45,7 @@ class CartItem(NamedTuple):
     name: str
     price: Decimal
     photo: Optional[str]
+    reserved_until: Optional[datetime] = None
     
 
 class Order(NamedTuple):

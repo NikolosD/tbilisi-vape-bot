@@ -5,7 +5,7 @@
 from typing import Dict, Any, Optional
 from .base import BasePage
 from database import db
-from keyboards import get_categories_keyboard, get_category_products_keyboard, get_product_card_keyboard
+from keyboards import get_categories_keyboard, get_category_products_keyboard, get_product_card_keyboard, get_category_products_keyboard_with_stock
 from i18n import _
 from utils.formatters import format_product_card
 
@@ -20,9 +20,10 @@ class CatalogPage(BasePage):
         """Отрендерить каталог"""
         category_id = kwargs.get('category_id')
         product_id = kwargs.get('product_id')
+        from_category = kwargs.get('from_category')
         
         if product_id:
-            return await self._render_product(user_id, product_id)
+            return await self._render_product(user_id, product_id, from_category)
         elif category_id:
             return await self._render_category(user_id, category_id)
         else:
@@ -58,17 +59,17 @@ class CatalogPage(BasePage):
             text = f"📂 <b>{category.name}</b>\n\n{_('catalog.category_empty', user_id=user_id)}"
             return {
                 'text': text,
-                'keyboard': get_category_products_keyboard([], category_id, user_id=user_id)
+                'keyboard': await get_category_products_keyboard_with_stock([], category_id, user_id=user_id)
             }
         
         text = f"📂 <b>{category.name}</b>\n\n{_('catalog.select_product', user_id=user_id)}"
         
         return {
             'text': text,
-            'keyboard': get_category_products_keyboard(products, category_id, user_id=user_id)
+            'keyboard': await get_category_products_keyboard_with_stock(products, category_id, user_id=user_id)
         }
     
-    async def _render_product(self, user_id: int, product_id: int) -> Dict[str, Any]:
+    async def _render_product(self, user_id: int, product_id: int, from_category: Optional[int] = None) -> Dict[str, Any]:
         """Отрендерить карточку товара"""
         product = await db.get_product(product_id)
         if not product:
@@ -83,11 +84,11 @@ class CatalogPage(BasePage):
                 break
         
         # Используем унифицированный форматтер
-        text = format_product_card(product, quantity_in_cart, user_id)
+        text = await format_product_card(product, quantity_in_cart, user_id)
         
         result = {
             'text': text,
-            'keyboard': get_product_card_keyboard(product.id, in_cart=(quantity_in_cart > 0), from_category=None)
+            'keyboard': get_product_card_keyboard(product.id, in_cart=(quantity_in_cart > 0), from_category=from_category)
         }
         
         # Добавляем фото если есть

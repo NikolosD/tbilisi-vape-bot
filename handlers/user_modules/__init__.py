@@ -18,8 +18,9 @@ def setup_user_routers():
     main_router = Router()
     
     # Include all sub-routers
-    main_router.include_router(catalog.router)
+    # ВАЖНО: cart.router должен быть ПЕРВЫМ, чтобы обрабатывать add_to_cart
     main_router.include_router(cart.router) 
+    main_router.include_router(catalog.router)
     main_router.include_router(orders.router)
     main_router.include_router(profile.router)
     main_router.include_router(menu.router)

@@ -11,6 +11,13 @@ from i18n import _
 
 router = Router()
 
+class OrderStates(StatesGroup):
+    waiting_order_search = State()
+    waiting_rejection_reason = State()
+    waiting_client_message = State()
+
+# Обработчик отклонения перенесен в main.py для избежания конфликтов
+
 async def safe_edit_message(callback, text, reply_markup=None, parse_mode='HTML'):
     """Безопасно редактировать сообщение (поддерживает и text и caption)"""
     try:
@@ -40,11 +47,6 @@ async def safe_edit_message(callback, text, reply_markup=None, parse_mode='HTML'
             reply_markup=reply_markup,
             parse_mode=parse_mode
         )
-
-class OrderStates(StatesGroup):
-    waiting_order_search = State()
-    waiting_rejection_reason = State()
-    waiting_client_message = State()
 
 @router.callback_query(F.data == "admin_all_orders", admin_filter)
 async def admin_all_orders_menu(callback: CallbackQuery):
@@ -280,6 +282,14 @@ async def confirm_payment(callback: CallbackQuery):
         await callback.answer("❌ Заказ не найден", show_alert=True)
         return
     
+    # Списываем товары со склада при подтверждении платежа
+    try:
+        products = order.products_data
+        for product in products:
+            await db.decrease_product_quantity(product['id'], product['quantity'])
+    except Exception as e:
+        print(f"Error decreasing stock on payment confirmation: {e}")
+    
     await db.update_order_status(order_id, 'paid')
     
     try:
@@ -299,17 +309,41 @@ async def confirm_payment(callback: CallbackQuery):
     await callback.answer("✅ Оплата подтверждена!")
     await show_admin_order(callback)
 
+@router.message(admin_filter)
+async def debug_all_admin_messages(message: Message, state: FSMContext):
+    """Отладочный обработчик для всех админских сообщений"""
+    current_state = await state.get_state()
+    data = await state.get_data()
+    print("🐛" + "="*50)
+    print(f"🐛 ADMIN MESSAGE INTERCEPTED!")
+    print(f"🐛 User: {message.from_user.id}")
+    print(f"🐛 Text: '{message.text}'")
+    print(f"🐛 Current state: {current_state}")
+    print(f"🐛 State data: {data}")
+    print(f"🐛 Expected state: 'OrderStates:waiting_rejection_reason'")
+    print("🐛" + "="*50)
+
 @router.message(OrderStates.waiting_rejection_reason, admin_filter)
 async def process_rejection_reason(message: Message, state: FSMContext):
     """Обработка причины отклонения платежа"""
+    print("=" * 50)
+    print("DEBUG: REJECTION HANDLER CALLED!")
+    print(f"DEBUG: Admin ID: {message.from_user.id}")
+    print(f"DEBUG: Message text: {message.text}")
+    print(f"DEBUG: Current state: {await state.get_state()}")
+    print("=" * 50)
+    
     reason = message.text
     data = await state.get_data()
+    print(f"DEBUG: State data: {data}")
     
     order_id = data.get('order_id')
     order_number = data.get('order_number')
     user_id = data.get('user_id')
     total_price = data.get('total_price')
     user_lang = data.get('user_lang', 'ru')
+    
+    print(f"DEBUG: Sending rejection message to user {user_id} for order {order_number}")
     
     if not order_id:
         await message.answer(_("admin.rejection_data_error", user_id=message.from_user.id))
@@ -328,6 +362,9 @@ async def process_rejection_reason(message: Message, state: FSMContext):
     menu_text = _("common.main_menu", user_id=user_id)
     
     try:
+        print(f"DEBUG: Sending message to user {user_id}")
+        print(f"DEBUG: Message text: {message_text}")
+        
         await message.bot.send_message(
             user_id,
             message_text,
@@ -338,15 +375,22 @@ async def process_rejection_reason(message: Message, state: FSMContext):
             ]),
             parse_mode='HTML'
         )
-        await message.answer(_("admin.rejection_success", user_id=message.from_user.id))
+        print(f"DEBUG: Message sent successfully to user {user_id}")
+        await message.answer("✅ Сообщение об отклонении отправлено пользователю!")
     except Exception as e:
-        await message.answer(_("admin.rejection_error", user_id=message.from_user.id, error=str(e)))
+        print(f"DEBUG: Error sending message to user {user_id}: {e}")
+        import traceback
+        print(f"DEBUG: Full error: {traceback.format_exc()}")
+        await message.answer(f"❌ Ошибка отправки сообщения: {str(e)}")
     
     await state.clear()
     
     await message.answer(
         "📋 <b>Управление заказами</b>",
-        reply_markup=get_admin_orders_keyboard(),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Все заказы", callback_data="admin_all_orders")],
+            [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")]
+        ]),
         parse_mode='HTML'
     )
 
@@ -405,12 +449,15 @@ async def deliver_order(callback: CallbackQuery):
     
     await callback.message.edit_text(
         "📋 <b>Управление заказами</b>",
-        reply_markup=get_admin_orders_keyboard(),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Все заказы", callback_data="admin_all_orders")],
+            [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")]
+        ]),
         parse_mode='HTML'
     )
 
 @router.callback_query(F.data.startswith("admin_cancel_"), admin_filter)
-async def cancel_order(callback: CallbackQuery):
+async def admin_cancel_order(callback: CallbackQuery):
     """Отменить заказ"""
     order_id = int(callback.data.split("_")[2])
     order = await db.get_order(order_id)
@@ -418,6 +465,15 @@ async def cancel_order(callback: CallbackQuery):
     if not order:
         await callback.answer("❌ Заказ не найден", show_alert=True)
         return
+    
+    # Возвращаем товары на склад только если заказ был подтвержден (товары были списаны)
+    if order.status in ['paid', 'shipping', 'delivered'] and order.status != 'cancelled':
+        try:
+            products = order.products_data
+            for product in products:
+                await db.increase_product_quantity(product['id'], product['quantity'])
+        except Exception as e:
+            print(f"Error returning products to stock: {e}")
     
     await db.update_order_status(order_id, 'cancelled')
     
@@ -436,7 +492,10 @@ async def cancel_order(callback: CallbackQuery):
     
     await callback.message.edit_text(
         "📋 <b>Управление заказами</b>",
-        reply_markup=get_admin_orders_keyboard(),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Все заказы", callback_data="admin_all_orders")],
+            [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")]
+        ]),
         parse_mode='HTML'
     )
 
@@ -473,6 +532,33 @@ async def set_order_status(callback: CallbackQuery):
     status = parts[2]
     order_id = int(parts[3])
     
+    order = await db.get_order(order_id)
+    if not order:
+        await callback.answer("❌ Заказ не найден", show_alert=True)
+        return
+    
+    # Если заказ отменяется, возвращаем товары на склад только если они были списаны
+    if status == 'cancelled' and order.status in ['paid', 'shipping', 'delivered']:
+        try:
+            import json
+            products = order.products_data
+            for product in products:
+                await db.increase_product_quantity(product['id'], product['quantity'])
+        except Exception as e:
+            print(f"Error returning products to stock: {e}")
+        
+        # Уведомляем клиента об отмене
+        try:
+            await callback.message.bot.send_message(
+                order.user_id,
+                f"❌ <b>Заказ отменен</b>\n\n"
+                f"Заказ #{order.order_number} был отменен администратором.\n"
+                f"Если у вас есть вопросы, обратитесь в поддержку.",
+                parse_mode='HTML'
+            )
+        except:
+            pass
+    
     await db.update_order_status(order_id, status)
     
     status_names = {
@@ -496,6 +582,14 @@ async def quick_confirm_payment(callback: CallbackQuery):
     if not order:
         await callback.answer("❌ Заказ не найден", show_alert=True)
         return
+    
+    # Списываем товары со склада при подтверждении платежа
+    try:
+        products = order.products_data
+        for product in products:
+            await db.decrease_product_quantity(product['id'], product['quantity'])
+    except Exception as e:
+        print(f"Error decreasing stock on quick payment confirmation: {e}")
     
     await db.update_order_status(order_id, 'paid')
     
@@ -526,7 +620,7 @@ async def quick_confirm_payment(callback: CallbackQuery):
         ])
     )
 
-@router.callback_query(F.data.startswith("quick_reject_"), admin_filter)
+@router.callback_query(F.data.startswith("quick_reject_") & ~F.data.startswith("quick_reject_with_reason_"), admin_filter)
 async def quick_reject_payment(callback: CallbackQuery):
     """Быстрое отклонение платежа"""
     order_id = int(callback.data.split("_")[2])
@@ -568,6 +662,87 @@ async def quick_reject_payment(callback: CallbackQuery):
     
     # Используем безопасную функцию для редактирования сообщения
     await safe_edit_message(callback, new_text, new_markup)
+
+@router.callback_query(F.data.startswith("quick_reject_with_reason_"), admin_filter)
+async def quick_reject_with_reason(callback: CallbackQuery, state: FSMContext):
+    """Быстрое отклонение платежа с запросом причины"""
+    order_id = int(callback.data.split("_")[4])
+    order = await db.get_order(order_id)
+    
+    if not order:
+        await callback.answer("❌ Заказ не найден", show_alert=True)
+        return
+    
+    user = await db.get_user(order.user_id)
+    user_lang = 'ru'
+    if user:
+        from i18n import i18n
+        user_lang = i18n.get_user_language(order.user_id) or 'ru'
+    
+    await state.update_data(
+        order_id=order_id, 
+        order_number=order.order_number, 
+        user_id=order.user_id,
+        total_price=order.total_price,
+        user_lang=user_lang
+    )
+    
+    lang_names = {'ru': '🇷🇺 Русский', 'en': '🇺🇸 English', 'ka': '🇬🇪 ქართული'}
+    
+    text = f"""❌ <b>Отклонение платежа</b>
+
+📋 Заказ #{order.order_number} - {order.total_price}₾
+👤 Клиент ID: {order.user_id}
+🌐 Язык клиента: {lang_names.get(user_lang, user_lang)}
+
+Напишите причину отклонения платежа:
+<i>Клиент получит это сообщение на своем языке</i>"""
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin_order_{order_id}")]
+    ])
+    
+    await safe_edit_message(callback, text, keyboard)
+    await state.set_state(OrderStates.waiting_rejection_reason)
+
+@router.callback_query(F.data.startswith("quick_message_"), admin_filter)
+async def quick_message_client(callback: CallbackQuery, state: FSMContext):
+    """Быстрое сообщение клиенту"""
+    order_id = int(callback.data.split("_")[2])
+    order = await db.get_order(order_id)
+    
+    if not order:
+        await callback.answer("❌ Заказ не найден", show_alert=True)
+        return
+    
+    await state.update_data(
+        client_id=order.user_id,
+        order_number=order.order_number,
+        order_id=order_id
+    )
+    # Используем состояние из communication.py для избежания конфликтов
+    from handlers.admin.communication import CommunicationStates
+    await state.set_state(CommunicationStates.waiting_client_message)
+    
+    from i18n import i18n
+    user_language = i18n.get_user_language(order.user_id)
+    language_names = {'ru': 'Русский', 'ka': 'ქართული', 'en': 'English'}
+    
+    text = f"""💬 <b>Сообщение клиенту</b>
+
+📋 Заказ #{order.order_number}
+👤 Клиент ID: {order.user_id}
+🌐 Язык: {language_names.get(user_language, user_language)}
+
+Напишите сообщение клиенту:
+<i>Сообщение будет отправлено с оформлением админа</i>"""
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin_order_{order_id}")]
+    ])
+    
+    await safe_edit_message(callback, text, keyboard)
+
 
 @router.callback_query(F.data.startswith("admin_orders_"), admin_filter)
 async def show_filtered_orders(callback: CallbackQuery):

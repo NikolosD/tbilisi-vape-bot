@@ -39,7 +39,8 @@ async def back_to_menu(callback: CallbackQuery):
         callback,
         _("welcome.title", user_id=user_id) + "\n\n" + _("welcome.description", user_id=user_id),
         reply_markup=get_main_menu_inline(is_admin=is_admin, user_id=user_id),
-        menu_state='main'
+        menu_state='main',
+        hide_reply_keyboard=True
     )
 
 @router.callback_query(F.data == "main_menu")

@@ -23,7 +23,8 @@ class CartPage(BasePage):
             from keyboards import get_back_to_menu_keyboard
             return {
                 'text': f"🛒<b>{self.get_title(user_id)}</b>\n\n{self.get_empty_message(user_id)}",
-                'keyboard': get_back_to_menu_keyboard(user_id=user_id)
+                'keyboard': get_back_to_menu_keyboard(user_id=user_id),
+                'hide_reply_keyboard': True  # Скрываем Reply клавиатуру при пустой корзине
             }
         
         total = sum(item.quantity * item.price for item in cart_items)
@@ -40,7 +41,17 @@ class CartPage(BasePage):
         
         text += _("cart.total", total=total, user_id=user_id)
         
+        # Добавляем информацию о времени резервирования
+        expiry_data = await db.get_cart_expiry_time(user_id)
+        if expiry_data:
+            remaining_minutes = expiry_data['minutes_left']
+            if remaining_minutes > 0:
+                text += f"\n⏱ Товары зарезервированы на {remaining_minutes} мин"
+            else:
+                text += f"\n⏱ Резерв истекает..."
+        
         return {
             'text': text,
-            'keyboard': get_cart_keyboard(cart_items)
+            'keyboard': get_cart_keyboard(cart_items),
+            'hide_reply_keyboard': True  # Скрываем Reply клавиатуру при показе корзины
         }

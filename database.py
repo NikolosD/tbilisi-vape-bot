@@ -2,9 +2,12 @@ import asyncpg
 import asyncio
 from datetime import datetime
 import json
+import logging
 from config import DATABASE_URL
 from models import User, Category, Product, CartItem, Order
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 class Database:
     def __init__(self):
@@ -14,7 +17,16 @@ class Database:
     async def init_pool(self):
         """Инициализация пула соединений"""
         if not self._pool:
-            self._pool = await asyncpg.create_pool(self.database_url, min_size=1, max_size=10)
+            async def init_connection(conn):
+                # Устанавливаем часовой пояс для каждого соединения
+                await conn.execute("SET timezone = 'Asia/Tbilisi'")
+            
+            self._pool = await asyncpg.create_pool(
+                self.database_url, 
+                min_size=1, 
+                max_size=10,
+                init=init_connection
+            )
     
     async def close_pool(self):
         """Закрытие пула соединений"""
@@ -201,20 +213,33 @@ class Database:
     
     # Методы для работы с корзиной
     async def add_to_cart(self, user_id, product_id, quantity=1):
-        """Добавление товара в корзину"""
-        query = """INSERT INTO cart (user_id, product_id, quantity) 
-                   VALUES ($1, $2, $3) 
+        """Добавление товара в корзину с резервированием"""
+        # Сначала очищаем просроченные резервы
+        await self.cleanup_expired_reservations()
+        
+        # Проверяем доступное количество товара
+        available = await self.get_available_product_quantity(product_id)
+        if available < quantity:
+            return False  # Недостаточно товара
+        
+        # Резервируем товар в корзине на 15 минут
+        query = """INSERT INTO cart (user_id, product_id, quantity, reserved_until) 
+                   VALUES ($1, $2, $3, CURRENT_TIMESTAMP + INTERVAL '15 minutes') 
                    ON CONFLICT (user_id, product_id) 
-                   DO UPDATE SET quantity = $3"""
+                   DO UPDATE SET quantity = $3, reserved_until = CURRENT_TIMESTAMP + INTERVAL '15 minutes'"""
         await self.execute(query, user_id, product_id, quantity)
+        return True
     
     async def get_cart(self, user_id) -> List[CartItem]:
-        """Получение корзины пользователя"""
+        """Получение корзины пользователя (только активные резервы)"""
+        # Сначала очищаем просроченные резервы
+        await self.cleanup_expired_reservations()
+        
         query = """
-        SELECT c.product_id, c.quantity, p.name, p.price, p.photo 
+        SELECT c.product_id, c.quantity, p.name, p.price, p.photo, c.reserved_until
         FROM cart c 
         JOIN products p ON c.product_id = p.id 
-        WHERE c.user_id = $1 AND p.in_stock = true
+        WHERE c.user_id = $1 AND p.in_stock = true AND c.reserved_until > CURRENT_TIMESTAMP
         """
         rows = await self.fetchall(query, user_id)
         return [CartItem(*row) for row in rows]
@@ -230,12 +255,29 @@ class Database:
         await self.execute(query, user_id)
     
     async def update_cart_quantity(self, user_id, product_id, quantity):
-        """Обновление количества товара в корзине"""
+        """Обновление количества товара в корзине с проверкой наличия"""
         if quantity <= 0:
             await self.remove_from_cart(user_id, product_id)
         else:
-            query = "UPDATE cart SET quantity = $1 WHERE user_id = $2 AND product_id = $3"
+            # Получаем текущее количество в корзине пользователя
+            cart_items = await self.get_cart(user_id)
+            current_user_quantity = 0
+            for item in cart_items:
+                if item.product_id == product_id:
+                    current_user_quantity = item.quantity
+                    break
+            
+            # Проверяем доступное количество товара с учетом собственного резерва
+            available = await self.get_available_product_quantity(product_id)
+            max_available_for_user = available + current_user_quantity
+            
+            if quantity > max_available_for_user:
+                return False  # Недостаточно товара
+            
+            query = """UPDATE cart SET quantity = $1, reserved_until = CURRENT_TIMESTAMP + INTERVAL '15 minutes' 
+                       WHERE user_id = $2 AND product_id = $3"""
             await self.execute(query, quantity, user_id, product_id)
+            return True
     
     # Методы для работы с заказами
     async def create_order(self, user_id, products, total_price, delivery_zone, delivery_price, phone, address, latitude=None, longitude=None):
@@ -264,9 +306,8 @@ class Database:
         if not result:
             return None
         
-        # Обновляем склад - уменьшаем количество товаров
-        for product in products:
-            await self.decrease_product_quantity(product['id'], product['quantity'])
+        # Товары НЕ списываются при создании заказа
+        # Списание происходит только при подтверждении платежа админом
         
         return result['order_number']  # Возвращаем order_number вместо id
     
@@ -394,11 +435,67 @@ class Database:
         query = "SELECT user_id FROM admins WHERE user_id = $1"
         result = await self.fetchone(query, user_id)
         return result is not None
+    
+    # Методы для резервирования товаров
+    async def get_available_product_quantity(self, product_id):
+        """Получить доступное количество товара с учетом резервов в корзинах"""
+        # Очищаем просроченные резервы
+        await self.cleanup_expired_reservations()
+        
+        query = """
+        SELECT p.stock_quantity - COALESCE(SUM(c.quantity), 0) as available
+        FROM products p
+        LEFT JOIN cart c ON p.id = c.product_id AND c.reserved_until > CURRENT_TIMESTAMP
+        WHERE p.id = $1 AND p.in_stock = true
+        GROUP BY p.stock_quantity
+        """
+        row = await self.fetchone(query, product_id)
+        return row['available'] if row else 0
+    
+    async def cleanup_expired_reservations(self):
+        """Очистка просроченных резервов в корзинах"""
+        query = "DELETE FROM cart WHERE reserved_until <= CURRENT_TIMESTAMP"
+        await self.execute(query)
+    
+    async def get_reserved_quantity(self, product_id):
+        """Получить зарезервированное количество товара"""
+        await self.cleanup_expired_reservations()
+        
+        query = "SELECT COALESCE(SUM(quantity), 0) FROM cart WHERE product_id = $1 AND reserved_until > CURRENT_TIMESTAMP"
+        row = await self.fetchone(query, product_id)
+        return row[0] if row else 0
+    
+    async def extend_cart_reservation(self, user_id, product_id):
+        """Продлить резервирование товара в корзине на 15 минут"""
+        query = """UPDATE cart SET reserved_until = CURRENT_TIMESTAMP + INTERVAL '15 minutes' 
+                   WHERE user_id = $1 AND product_id = $2"""
+        await self.execute(query, user_id, product_id)
+    
+    async def get_cart_expiry_time(self, user_id):
+        """Получить время истечения резервов в корзине пользователя"""
+        query = """SELECT MIN(reserved_until) as expiry, 
+                          EXTRACT(EPOCH FROM (MIN(reserved_until) - CURRENT_TIMESTAMP))/60 as minutes_left
+                   FROM cart 
+                   WHERE user_id = $1 AND reserved_until > CURRENT_TIMESTAMP"""
+        row = await self.fetchone(query, user_id)
+        if row and row['expiry']:
+            return {
+                'expiry_time': row['expiry'],
+                'minutes_left': max(0, int(row['minutes_left']))
+            }
+        return None
 
 
 async def init_db():
     """Инициализация базы данных"""
     conn = await asyncpg.connect(DATABASE_URL)
+    
+    # Устанавливаем грузинский часовой пояс
+    try:
+        await conn.execute("SET timezone = 'Asia/Tbilisi'")
+        logger.info("✅ Установлен часовой пояс: Asia/Tbilisi (GMT+4)")
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось установить часовой пояс: {e}")
     
     # Таблица пользователей
     await conn.execute('''CREATE TABLE IF NOT EXISTS users (
@@ -475,10 +572,17 @@ async def init_db():
         user_id BIGINT,
         product_id INTEGER,
         quantity INTEGER DEFAULT 1,
+        reserved_until TIMESTAMP DEFAULT CURRENT_TIMESTAMP + INTERVAL '15 minutes',
         PRIMARY KEY (user_id, product_id),
         FOREIGN KEY (user_id) REFERENCES users (user_id),
         FOREIGN KEY (product_id) REFERENCES products (id)
     )''')
+    
+    # Добавляем поле reserved_until для существующих таблиц корзины
+    try:
+        await conn.execute('ALTER TABLE cart ADD COLUMN reserved_until TIMESTAMP DEFAULT CURRENT_TIMESTAMP + INTERVAL \'15 minutes\'')
+    except:
+        pass  # Поле уже существует
     
     # Таблица администраторов
     await conn.execute('''CREATE TABLE IF NOT EXISTS admins (
