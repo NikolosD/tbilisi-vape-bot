@@ -59,7 +59,7 @@ class MessageManager:
         parse_mode: str = 'HTML',
         menu_state: str = 'main',
         force_new: bool = False,
-        send_reply_keyboard: bool = True,
+        send_reply_keyboard: bool = False,
         photo: str = None
     ) -> Message:
         """
@@ -160,7 +160,7 @@ class MessageManager:
         reply_markup=None, 
         parse_mode: str = 'HTML',
         menu_state: str = 'main',
-        send_reply_keyboard: bool = True,
+        send_reply_keyboard: bool = False,
         photo: str = None
     ):
         """

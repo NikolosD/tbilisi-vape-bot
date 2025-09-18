@@ -22,7 +22,7 @@ import os
 
 from config import BOT_TOKEN, ADMIN_IDS
 from database import db, init_db
-from keyboards import get_main_menu
+from keyboards import get_main_menu, get_main_menu_inline
 from handlers.user import router as user_router
 from handlers.admin import admin_router
 from admin_management import router as admin_management_router
@@ -51,71 +51,7 @@ dp.include_router(user_router)
 dp.include_router(admin_management_router)  # Важно: подключаем ДО admin_router
 dp.include_router(admin_router)
 
-# ВРЕМЕННО: добавим хендлеры прямо в dp для отладки
-from button_filters import is_catalog_button, is_cart_button, is_orders_button, is_contact_button, is_info_button, is_language_button
-from pages.manager import page_manager
-
-@dp.message(is_catalog_button)
-async def temp_catalog_handler(message: Message):
-    """Временный хендлер каталога"""
-    print(f"🛍 TEMP CATALOG: Handler called for '{message.text}'")
-    await page_manager.catalog.show_from_message(message)
-
-@dp.message(is_cart_button)  
-async def temp_cart_handler(message: Message):
-    """Временный хендлер корзины"""
-    print(f"🛒 TEMP CART: Handler called for '{message.text}'")
-    await page_manager.cart.show_from_message(message)
-
-@dp.message(is_orders_button)
-async def temp_orders_handler(message: Message):
-    """Временный хендлер заказов"""
-    print(f"📋 TEMP ORDERS: Handler called for '{message.text}'")
-    await page_manager.orders.show_from_message(message)
-
-@dp.message(is_contact_button)
-async def temp_contact_handler(message: Message):
-    """Временный хендлер контактов"""
-    print(f"💬 TEMP CONTACT: Handler called for '{message.text}'")
-    # Используем ту же логику что и callback хендлер
-    user_id = message.from_user.id
-    from message_manager import message_manager
-    
-    # Получаем данные страницы через ProfilePage
-    page_data = await page_manager.profile.render(user_id, type='contact')
-    
-    await message_manager.send_or_edit_message(
-        message.bot, user_id,
-        page_data['text'],
-        reply_markup=page_data['keyboard'],
-        menu_state='contact',
-        force_new=True
-    )
-
-@dp.message(is_info_button)
-async def temp_info_handler(message: Message):
-    """Временный хендлер информации"""
-    print(f"ℹ️ TEMP INFO: Handler called for '{message.text}'")
-    await page_manager.info.show_from_message(message)
-
-@dp.message(is_language_button)
-async def temp_language_handler(message: Message):
-    """Временный хендлер языка"""
-    print(f"🌐 TEMP LANGUAGE: Handler called for '{message.text}'")
-    # Используем ту же логику что и callback хендлер
-    user_id = message.from_user.id
-    from message_manager import message_manager
-    
-    # Получаем данные страницы через ProfilePage
-    page_data = await page_manager.profile.render(user_id, type='language')
-    
-    await message_manager.send_or_edit_message(
-        message.bot, user_id,
-        page_data['text'],
-        reply_markup=page_data['keyboard'],
-        menu_state='language',
-        force_new=True
-    )
+# ReplyKeyboard убран - теперь используем только inline кнопки
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
@@ -147,7 +83,7 @@ async def cmd_start(message: Message):
     
     sent_message = await message.answer(
         welcome_text,
-        reply_markup=get_main_menu(is_admin=is_admin, user_id=user_id),
+        reply_markup=get_main_menu_inline(is_admin=is_admin, user_id=user_id),
         parse_mode='HTML'
     )
     
@@ -240,10 +176,7 @@ async def debug_all_messages(message: Message, state: FSMContext):
     """Глобальный обработчик для отладки всех сообщений"""
     from config import ADMIN_IDS
     
-    # Пропускаем кнопки главного меню - они теперь обрабатываются временными хендлерами
-    if (message.text and (is_catalog_button(message) or is_cart_button(message) or is_orders_button(message) or 
-                         is_contact_button(message) or is_info_button(message) or is_language_button(message))):
-        return  # Передаем обработку в временные хендлеры
+    # ReplyKeyboard больше не используется - все кнопки inline
     
     # Логируем только сообщения от админов для уменьшения спама
     if message.from_user.id in ADMIN_IDS:
