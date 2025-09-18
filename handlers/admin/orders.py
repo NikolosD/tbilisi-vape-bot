@@ -6,7 +6,7 @@ from aiogram.fsm.state import State, StatesGroup
 from config import ADMIN_IDS, DELIVERY_ZONES
 from database import db
 from filters.admin import admin_filter
-from keyboards import get_admin_order_actions_keyboard, get_admin_orders_keyboard
+from keyboards import get_admin_order_actions_keyboard
 from i18n import _
 from utils.loader import with_loader
 from handlers.user_modules.cart import delete_message_after_delay
@@ -124,6 +124,18 @@ async def admin_all_orders_page(callback: CallbackQuery, page: int):
         )
 
     additional_buttons = [
+        [
+            InlineKeyboardButton(text="⏳ Ожидающие", callback_data="filter_orders_pending"),
+            InlineKeyboardButton(text="💰 На проверке", callback_data="filter_orders_checking")
+        ],
+        [
+            InlineKeyboardButton(text="✅ Оплачены", callback_data="filter_orders_paid"),
+            InlineKeyboardButton(text="🚚 В доставке", callback_data="filter_orders_shipping")
+        ],
+        [
+            InlineKeyboardButton(text="📦 Доставлены", callback_data="filter_orders_delivered"),
+            InlineKeyboardButton(text="❌ Отменены", callback_data="filter_orders_cancelled")
+        ],
         [InlineKeyboardButton(text="🔍 Поиск по номеру", callback_data="admin_search_order")],
         [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")]
     ]
@@ -547,6 +559,9 @@ async def admin_cancel_order(callback: CallbackQuery):
             f"❌ <b>Заказ отменен</b>\n\n"
             f"Заказ #{order.order_number} был отменен администратором.\n"
             f"Если у вас есть вопросы, обратитесь в поддержку.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
+            ]),
             parse_mode='HTML'
         )
     except:
@@ -554,13 +569,13 @@ async def admin_cancel_order(callback: CallbackQuery):
     
     await callback.answer("❌ Заказ отменен!")
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback,
         "📋 <b>Управление заказами</b>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Все заказы", callback_data="admin_all_orders")],
             [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")]
-        ]),
-        parse_mode='HTML'
+        ])
     )
 
 @router.callback_query(F.data.startswith("admin_change_status_"), admin_filter)
@@ -618,6 +633,9 @@ async def set_order_status(callback: CallbackQuery):
                 f"❌ <b>Заказ отменен</b>\n\n"
                 f"Заказ #{order.order_number} был отменен администратором.\n"
                 f"Если у вас есть вопросы, обратитесь в поддержку.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
+                ]),
                 parse_mode='HTML'
             )
         except:
@@ -782,6 +800,7 @@ async def quick_reject_with_reason(callback: CallbackQuery, state: FSMContext):
     await safe_edit_message(callback, text, keyboard)
     await state.set_state(OrderStates.waiting_rejection_reason)
 
+
 @router.callback_query(F.data.startswith("quick_message_"), admin_filter)
 async def quick_message_client(callback: CallbackQuery, state: FSMContext):
     """Быстрое сообщение клиенту"""
@@ -821,36 +840,34 @@ async def quick_message_client(callback: CallbackQuery, state: FSMContext):
     await safe_edit_message(callback, text, keyboard)
 
 
-@router.callback_query(F.data.startswith("admin_orders_"), admin_filter)
-async def show_filtered_orders(callback: CallbackQuery):
-    """Показать отфильтрованные заказы"""
+@router.callback_query(F.data.startswith("filter_orders_"), admin_filter)
+async def filter_orders(callback: CallbackQuery):
+    """Фильтрация заказов по статусу"""
     filter_type = callback.data.split("_")[2]
     await show_filtered_orders_page(callback, filter_type, 1)
 
-@router.callback_query(F.data.startswith("admin_orders_page_"), admin_filter)
-async def show_filtered_orders_pagination(callback: CallbackQuery):
-    """Пагинация для отфильтрованных заказов"""
-    parts = callback.data.split("_")
-    filter_type = parts[3]
-    page = int(parts[4])
-    await show_filtered_orders_page(callback, filter_type, page)
-
 async def show_filtered_orders_page(callback: CallbackQuery, filter_type: str, page: int):
-    """Отобразить страницу отфильтрованных заказов"""
+    """Показать отфильтрованные заказы"""
     from components.pagination import pagination
     
     all_orders = await db.get_all_orders()
     
     # Фильтруем заказы в зависимости от типа
     if filter_type == "pending":
-        orders = [order for order in all_orders if order.status in ["waiting_payment", "payment_check"]]
+        orders = [order for order in all_orders if order.status == "waiting_payment"]
         title = "⏳ Ожидающие заказы"
-    elif filter_type == "active":
-        orders = [order for order in all_orders if order.status in ["paid", "shipping"]]
-        title = "🚚 Активные заказы"
-    elif filter_type == "completed":
+    elif filter_type == "checking":
+        orders = [order for order in all_orders if order.status == "payment_check"]
+        title = "💰 Заказы на проверке"
+    elif filter_type == "paid":
+        orders = [order for order in all_orders if order.status == "paid"]
+        title = "✅ Оплаченные заказы"
+    elif filter_type == "shipping":
+        orders = [order for order in all_orders if order.status == "shipping"]
+        title = "🚚 Заказы в доставке"
+    elif filter_type == "delivered":
         orders = [order for order in all_orders if order.status == "delivered"]
-        title = "✅ Завершенные заказы"
+        title = "📦 Доставленные заказы"
     elif filter_type == "cancelled":
         orders = [order for order in all_orders if order.status == "cancelled"]
         title = "❌ Отмененные заказы"
@@ -861,6 +878,7 @@ async def show_filtered_orders_page(callback: CallbackQuery, filter_type: str, p
     if not orders:
         text = f"{title}\n\nЗаказов нет."
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Все заказы", callback_data="admin_all_orders")],
             [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")]
         ])
         
@@ -893,12 +911,13 @@ async def show_filtered_orders_page(callback: CallbackQuery, filter_type: str, p
         )
     
     additional_buttons = [
+        [InlineKeyboardButton(text="📋 Все заказы", callback_data="admin_all_orders")],
         [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")]
     ]
     
     keyboard = pagination.create_pagination_keyboard(
         pagination_info=pagination_info,
-        callback_prefix=f"admin_orders_page_{filter_type}",
+        callback_prefix=f"filter_orders_page_{filter_type}",
         user_id=callback.from_user.id,
         item_button_generator=order_button_generator,
         additional_buttons=additional_buttons
@@ -909,6 +928,14 @@ async def show_filtered_orders_page(callback: CallbackQuery, filter_type: str, p
     except:
         await callback.message.delete()
         await callback.message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+
+@router.callback_query(F.data.startswith("filter_orders_page_"), admin_filter)
+async def filter_orders_pagination(callback: CallbackQuery):
+    """Пагинация для отфильтрованных заказов"""
+    parts = callback.data.split("_")
+    filter_type = parts[3]
+    page = int(parts[4])
+    await show_filtered_orders_page(callback, filter_type, page)
 
 @router.message(OrderStates.waiting_order_search, admin_filter)
 async def process_order_search(message: Message, state: FSMContext):

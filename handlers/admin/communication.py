@@ -240,13 +240,7 @@ async def process_multilang_broadcast(message: Message, state: FSMContext):
         await process_broadcast_logic(message, state)
 
 
-# Резервный обработчик для отладки (только для неперехваченных состояний)
-@router.message(~F.state.in_({CommunicationStates.waiting_broadcast_message, CommunicationStates.waiting_broadcast_language, CommunicationStates.waiting_client_message, CommunicationStates.waiting_client_id, CommunicationStates.waiting_general_client_message}), admin_filter)
-async def debug_admin_message(message: Message, state: FSMContext):
-    """Отладочный обработчик для всех admin сообщений (только для неактивных состояний)"""
-    current_state = await state.get_state()
-    data = await state.get_data()
-    print(f"🐛 DEBUG: Admin message received (fallback). User: {message.from_user.id}, State: {current_state}, Data: {data}")
+# Debug handler removed - was interfering with main handlers
 
 @router.callback_query(F.data.startswith("admin_message_client_"), admin_filter)
 async def start_message_to_client(callback: CallbackQuery, state: FSMContext):
@@ -341,6 +335,9 @@ async def process_client_message(message: Message, state: FSMContext):
         await message.bot.send_message(
             client_id,
             client_message,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
+            ]),
             parse_mode='HTML'
         )
         
@@ -356,6 +353,7 @@ async def process_client_message(message: Message, state: FSMContext):
             ]),
             parse_mode='HTML'
         )
+        
     except Exception as e:
         admin_language = 'ru'
         await message.answer(
@@ -448,6 +446,9 @@ async def process_general_client_message(message: Message, state: FSMContext):
         await message.bot.send_message(
             client_id,
             client_message,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
+            ]),
             parse_mode='HTML'
         )
         

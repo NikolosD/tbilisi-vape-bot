@@ -239,12 +239,81 @@ async def process_address(message: Message, state: FSMContext):
     # Отладочная информация
     logger.info(f"Получен адрес: {address} от пользователя {user_id}")
     
-    # Убираем Reply клавиатуру и создаем сообщение для лоадера
+    # Убираем Reply клавиатуру и создаем анимированное сообщение для лоадера
+    import asyncio
+    
     loading_msg = await message.answer(
-        "⏳ Обрабатываем заказ...",
+        "📋 <b>Создаем ваш заказ...</b>\n\n"
+        "🔄 Обработка данных...\n"
+        "▰▱▱▱▱▱▱▱▱▱ 10%",
         reply_markup=ReplyKeyboardRemove(),
         parse_mode='HTML'
     )
+    
+    await asyncio.sleep(0.4)
+    try:
+        await loading_msg.edit_text(
+            "📋 <b>Создаем ваш заказ...</b>\n\n"
+            "🔍 Проверка товаров...\n"
+            "▰▰▰▱▱▱▱▱▱▱ 30%",
+            parse_mode='HTML'
+        )
+    except Exception:
+        # Создаем новое сообщение если не удалось отредактировать
+        try:
+            await loading_msg.delete()
+        except:
+            pass
+        loading_msg = await message.answer(
+            "📋 <b>Создаем ваш заказ...</b>\n\n"
+            "🔍 Проверка товаров...\n"
+            "▰▰▰▱▱▱▱▱▱▱ 30%",
+            parse_mode='HTML'
+        )
+    
+    await asyncio.sleep(0.4)
+    try:
+        await loading_msg.edit_text(
+            "📋 <b>Создаем ваш заказ...</b>\n\n"
+            "💰 Расчет стоимости...\n"
+            "▰▰▰▰▰▰▱▱▱▱ 60%",
+            parse_mode='HTML'
+        )
+    except Exception:
+        # Создаем новое сообщение если не удалось отредактировать
+        try:
+            await loading_msg.delete()
+        except:
+            pass
+        loading_msg = await message.answer(
+            "📋 <b>Создаем ваш заказ...</b>\n\n"
+            "💰 Расчет стоимости...\n"
+            "▰▰▰▰▰▰▱▱▱▱ 60%",
+            parse_mode='HTML'
+        )
+    
+    await asyncio.sleep(0.4)
+    try:
+        await loading_msg.edit_text(
+            "📋 <b>Создаем ваш заказ...</b>\n\n"
+            "📦 Резервирование товаров...\n"
+            "▰▰▰▰▰▰▰▰▱▱ 80%",
+            parse_mode='HTML'
+        )
+    except Exception:
+        # Создаем новое сообщение если не удалось отредактировать
+        try:
+            await loading_msg.delete()
+        except:
+            pass
+        loading_msg = await message.answer(
+            "📋 <b>Создаем ваш заказ...</b>\n\n"
+            "📦 Резервирование товаров...\n"
+            "▰▰▰▰▰▰▰▰▱▱ 80%",
+            parse_mode='HTML'
+        )
+    
+    await asyncio.sleep(0.5)
     
     # Получаем данные из состояния
     data = await state.get_data()
@@ -497,10 +566,22 @@ async def process_address(message: Message, state: FSMContext):
         pass
     
     
+    # Финальная анимация завершения
+    try:
+        await loading_msg.edit_text(
+            "📋 <b>Создаем ваш заказ...</b>\n\n"
+            "✅ Заказ готов!\n"
+            "▰▰▰▰▰▰▰▰▰▰ 100%",
+            parse_mode='HTML'
+        )
+        await asyncio.sleep(0.6)
+    except Exception:
+        pass
+    
     # Заменяем сообщение лоадера на финальные детали заказа
     try:
         await loading_msg.edit_text(
-            order_text,
+            f"🎉 <b>ЗАКАЗ СОЗДАН!</b> 🎉\n\n{order_text}",
             reply_markup=get_order_confirmation_keyboard(order_id, user_id=user_id),
             parse_mode='HTML'
         )
@@ -512,13 +593,13 @@ async def process_address(message: Message, state: FSMContext):
         except Exception:
             pass
         # Отправляем новое сообщение
-        await message_manager.send_or_edit_message(
-            message.bot, user_id,
-            order_text,
+        sent_message = await message.answer(
+            f"🎉 <b>ЗАКАЗ СОЗДАН!</b> 🎉\n\n{order_text}",
             reply_markup=get_order_confirmation_keyboard(order_id, user_id=user_id),
-            menu_state='order_created',
-            force_new=True
+            parse_mode='HTML'
         )
+        # Сохраняем ID нового сообщения
+        message_manager.set_user_message(user_id, sent_message.message_id, 'order_created')
     else:
         # Обновляем менеджер сообщений
         message_manager.set_user_message(user_id, loading_msg.message_id, 'order_created')

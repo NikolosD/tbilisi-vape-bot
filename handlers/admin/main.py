@@ -21,13 +21,13 @@ from .communication import router as communication_router
 # Основной роутер админки
 router = Router()
 
-# Подключаем роутеры подмодулей
+# Подключаем роутеры подмодулей (communication_router первым для приоритета)
+router.include_router(communication_router)
 router.include_router(products_router)
 router.include_router(orders_router)
 router.include_router(stats_router)
 router.include_router(security_router)
 router.include_router(categories_router)
-router.include_router(communication_router)
 
 # Основные состояния админки
 class AdminStates(StatesGroup):
@@ -85,78 +85,53 @@ async def show_admin_panel(callback: CallbackQuery, state: FSMContext):
             parse_mode='HTML'
         )
 
-# Обработчик общих админских сообщений
-@router.message(F.text, lambda message: message.from_user.id in ADMIN_IDS)
-async def process_admin_message(message: Message, state: FSMContext):
-    """Обработка сообщений от админа в зависимости от состояния"""
-    current_state = await state.get_state()
+# Обработчик ТОЛЬКО для отклонения платежа (с конкретным состоянием)
+from .orders import OrderStates
+
+@router.message(OrderStates.waiting_rejection_reason, F.text, lambda message: message.from_user.id in ADMIN_IDS)
+async def process_rejection_reason_main(message: Message, state: FSMContext):
+    """Обработка причины отклонения платежа"""
     
-    # Специальная обработка для отклонения платежа
-    if current_state == "OrderStates:waiting_rejection_reason":
-        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-        from i18n import _
-        
-        data = await state.get_data()
-        reason = message.text
-        
-        order_id = data.get('order_id')
-        order_number = data.get('order_number')
-        user_id = data.get('user_id')
-        total_price = data.get('total_price')
-        user_lang = data.get('user_lang', 'ru')
-        
-        if order_id and user_id:
-            from database import db
-            await db.update_order_status(order_id, 'waiting_payment')
-            
-            message_text = _("admin.payment_rejected", user_id=user_id, 
-                            order_number=order_number, 
-                            total_price=total_price,
-                            reason=reason)
-            
-            resend_text = _("admin.resend_screenshot", user_id=user_id)
-            contact_text = _("admin.contact_support", user_id=user_id)
-            menu_text = _("common.main_menu", user_id=user_id)
-            
-            try:
-                await message.bot.send_message(
-                    user_id,
-                    message_text,
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text=resend_text, callback_data=f"resend_screenshot_{order_number}")],
-                        [InlineKeyboardButton(text=contact_text, callback_data="contact")],
-                        [InlineKeyboardButton(text=menu_text, callback_data="back_to_menu")]
-                    ]),
-                    parse_mode='HTML'
-                )
-                await message.answer("✅ Сообщение об отклонении отправлено пользователю!")
-            except Exception as e:
-                await message.answer(f"❌ Ошибка отправки сообщения: {str(e)}")
-        else:
-            await message.answer("❌ Ошибка: данные заказа не найдены")
-        
-        await state.clear()
-        return
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    from i18n import _
     
-    # Проверяем другие специфичные состояния из подмодулей
-    if current_state in [
-        "ProductStates:waiting_quantity_input", 
-        "OrderStates:waiting_order_search",
-        "CommunicationStates:waiting_broadcast_message",
-        "CommunicationStates:waiting_client_message", 
-        "CommunicationStates:waiting_client_id",
-        "CommunicationStates:waiting_general_client_message",
-        "CategoryStates:waiting_category_name",
-        "CategoryStates:waiting_category_emoji", 
-        "CategoryStates:waiting_category_description",
-        "ProductStates:waiting_product_name",
-        "ProductStates:waiting_product_price",
-        "ProductStates:waiting_product_description",
-        "ProductStates:waiting_product_quantity",
-        "ProductStates:waiting_product_photo"
-    ]:
-        # Эти состояния обрабатываются специфичными обработчиками в подмодулях
-        return
+    data = await state.get_data()
+    reason = message.text
+    
+    order_id = data.get('order_id')
+    order_number = data.get('order_number')
+    user_id = data.get('user_id')
+    total_price = data.get('total_price')
+    user_lang = data.get('user_lang', 'ru')
+    
+    if order_id and user_id:
+        from database import db
+        await db.update_order_status(order_id, 'waiting_payment')
+        
+        message_text = _("admin.payment_rejected", user_id=user_id, 
+                        order_number=order_number, 
+                        total_price=total_price,
+                        reason=reason)
+        
+        resend_text = _("admin.resend_screenshot", user_id=user_id)
+        contact_text = _("admin.contact_support", user_id=user_id)
+        menu_text = _("common.main_menu", user_id=user_id)
+        
+        try:
+            await message.bot.send_message(
+                user_id,
+                message_text,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text=resend_text, callback_data=f"resend_screenshot_{order_number}")],
+                    [InlineKeyboardButton(text=contact_text, callback_data="contact")],
+                    [InlineKeyboardButton(text=menu_text, callback_data="back_to_menu")]
+                ]),
+                parse_mode='HTML'
+            )
+            await message.answer("✅ Сообщение об отклонении отправлено пользователю!")
+        except Exception as e:
+            await message.answer(f"❌ Ошибка отправки сообщения: {str(e)}")
     else:
-        # Если не в специфичном состоянии, удаляем сообщение
-        await message.delete()
+        await message.answer("❌ Ошибка: данные заказа не найдены")
+    
+    await state.clear()

@@ -211,17 +211,83 @@ async def add_to_cart(callback: CallbackQuery):
             quantity_in_cart = item.quantity
             break
     
-    # Показываем временное уведомление о добавлении товара
-    success_msg = await callback.message.answer(
-        "✅ <b>Товар добавлен в корзину!</b>\n\n"
-        "🔒 Товар зарезервирован на 15 минут\n"
-        "⏰ Завершите заказ в течение этого времени",
-        parse_mode='HTML'
-    )
-    
-    # Удаляем уведомление через 4 секунды
+    # Крутая анимация добавления в корзину
     import asyncio
-    asyncio.create_task(delete_message_after_delay(callback.bot, callback.message.chat.id, success_msg.message_id, 4))
+    
+    # Шаг 1: Анимация загрузки (редактируем исходное сообщение товара)
+    try:
+        await callback.message.edit_text(
+            "🛒💨 <b>Добавляем товар...</b>\n\n"
+            "▰▱▱▱▱▱▱▱▱▱ 10%",
+            parse_mode='HTML'
+        )
+        loading_msg = callback.message
+    except Exception:
+        # Если не удалось отредактировать, создаем новое сообщение
+        loading_msg = await callback.message.answer(
+            "🛒💨 <b>Добавляем товар...</b>\n\n"
+            "▰▱▱▱▱▱▱▱▱▱ 10%",
+            parse_mode='HTML'
+        )
+    
+    await asyncio.sleep(0.1)
+    try:
+        await loading_msg.edit_text(
+            "🛒💨 <b>Добавляем товар...</b>\n\n"
+            "▰▰▰▱▱▱▱▱▱▱ 30%",
+            parse_mode='HTML'
+        )
+    except Exception:
+        # Создаем новое сообщение если не удалось отредактировать
+        try:
+            await loading_msg.delete()
+        except:
+            pass
+        loading_msg = await callback.message.answer(
+            "🛒💨 <b>Добавляем товар...</b>\n\n"
+            "▰▰▰▱▱▱▱▱▱▱ 30%",
+            parse_mode='HTML'
+        )
+    
+    await asyncio.sleep(0.1)
+    try:
+        await loading_msg.edit_text(
+            "🛒💨 <b>Добавляем товар...</b>\n\n"
+            "▰▰▰▰▰▰▱▱▱▱ 60%",
+            parse_mode='HTML'
+        )
+    except Exception:
+        # Создаем новое сообщение если не удалось отредактировать
+        try:
+            await loading_msg.delete()
+        except:
+            pass
+        loading_msg = await callback.message.answer(
+            "🛒💨 <b>Добавляем товар...</b>\n\n"
+            "▰▰▰▰▰▰▱▱▱▱ 60%",
+            parse_mode='HTML'
+        )
+    
+    await asyncio.sleep(0.1)
+    try:
+        await loading_msg.edit_text(
+            "🛒💨 <b>Резервируем товар...</b>\n\n"
+            "▰▰▰▰▰▰▰▰▱▱ 80%",
+            parse_mode='HTML'
+        )
+    except Exception:
+        # Создаем новое сообщение если не удалось отредактировать
+        try:
+            await loading_msg.delete()
+        except:
+            pass
+        loading_msg = await callback.message.answer(
+            "🛒💨 <b>Резервируем товар...</b>\n\n"
+            "▰▰▰▰▰▰▰▰▱▱ 80%",
+            parse_mode='HTML'
+        )
+    
+    await asyncio.sleep(0.1)
     
     # Обновляем текст товара с информацией о количестве в корзине
     product_text = await format_product_card(product, quantity_in_cart, callback.from_user.id)
@@ -229,13 +295,13 @@ async def add_to_cart(callback: CallbackQuery):
     # Обновляем сообщение с новым текстом и кнопками
     keyboard = get_product_card_keyboard(product_id, in_cart=True, from_category=from_category)
     
-    # Пытаемся отредактировать текущее сообщение
+    # Пытаемся отредактировать сообщение с анимацией
     try:
-        await callback.message.edit_text(product_text, reply_markup=keyboard, parse_mode='HTML')
+        await loading_msg.edit_text(product_text, reply_markup=keyboard, parse_mode='HTML')
     except Exception:
         # Если не получается отредактировать, удаляем и создаем новое
         try:
-            await callback.message.delete()
+            await loading_msg.delete()
         except Exception:
             pass
         await message_manager.send_or_edit_message(
