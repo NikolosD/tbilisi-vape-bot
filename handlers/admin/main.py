@@ -9,6 +9,7 @@ from config import ADMIN_IDS, SUPER_ADMIN_ID
 from keyboards import get_enhanced_admin_keyboard
 from filters.admin import admin_filter
 from i18n import _
+from utils.safe_operations import safe_edit_message
 
 # Импортируем роутеры из подмодулей
 from .products import router as products_router

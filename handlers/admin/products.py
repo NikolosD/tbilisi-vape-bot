@@ -1,3 +1,4 @@
+import logging
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
@@ -8,6 +9,9 @@ from database import db
 from filters.admin import admin_filter
 from keyboards import get_admin_products_keyboard, get_category_selection_keyboard
 from i18n import _
+from utils.safe_operations import safe_edit_message
+
+logger = logging.getLogger(__name__)
 from utils.loader import with_loader
 
 router = Router()
@@ -26,11 +30,11 @@ async def admin_products_menu(callback: CallbackQuery):
     """Меню управления товарами"""
     products = await db.get_all_products()
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback,
         f"📦 <b>Управление товарами</b>\n\n"
         f"Всего товаров: {len(products)}",
-        reply_markup=get_admin_products_keyboard(),
-        parse_mode='HTML'
+        reply_markup=get_admin_products_keyboard()
     )
 
 @router.callback_query(F.data == "admin_edit_products", admin_filter)
@@ -39,11 +43,10 @@ async def admin_edit_products(callback: CallbackQuery):
     products = await db.get_all_products()
     
     if not products:
-        await callback.message.edit_text(
+        await safe_edit_message(callback, 
             "📦 <b>Товары отсутствуют</b>\n\n"
             "Сначала добавьте товары через меню.",
-            reply_markup=get_admin_products_keyboard(),
-            parse_mode='HTML'
+            reply_markup=get_admin_products_keyboard()
         )
         return
     
@@ -58,11 +61,10 @@ async def admin_edit_products(callback: CallbackQuery):
     
     keyboard.append([InlineKeyboardButton(text="🔙 Управление товарами", callback_data="admin_products")])
     
-    await callback.message.edit_text(
+    await safe_edit_message(callback, 
         "📝 <b>Редактировать товары</b>\n\n"
         "Выберите товар для редактирования:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
-        parse_mode='HTML'
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
 
 @router.callback_query(F.data.startswith("edit_product_"), admin_filter)
@@ -84,7 +86,7 @@ async def edit_product_menu(callback: CallbackQuery):
     
     stock_status = "✅ В наличии" if product.in_stock else "❌ Скрыт"
     
-    await callback.message.edit_text(
+    await safe_edit_message(callback, 
         f"✏️ <b>Редактирование товара</b>\n\n"
         f"📝 <b>Название:</b> {product.name}\n"
         f"💰 <b>Цена:</b> {product.price}₾\n"
@@ -109,7 +111,7 @@ async def edit_product_quantity(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ProductStates.waiting_quantity_input)
     await state.update_data(product_id=product_id)
     
-    await callback.message.edit_text(
+    await safe_edit_message(callback, 
         f"📦 <b>Изменение количества</b>\n\n"
         f"📝 <b>Товар:</b> {product.name}\n"
         f"📊 <b>Текущее количество:</b> {product.stock_quantity} шт.\n\n"
@@ -130,7 +132,7 @@ async def confirm_delete_product(callback: CallbackQuery):
         [InlineKeyboardButton(text="❌ Отмена", callback_data=f"edit_product_{product_id}")]
     ]
     
-    await callback.message.edit_text(
+    await safe_edit_message(callback, 
         "🗑 <b>Удаление товара</b>\n\n"
         "⚠️ Вы уверены, что хотите удалить этот товар?\n"
         "Это действие нельзя отменить!",
@@ -195,7 +197,7 @@ async def toggle_product_stock(callback: CallbackQuery):
     
     stock_status = "✅ В наличии" if new_stock else "❌ Скрыт"
     
-    await callback.message.edit_text(
+    await safe_edit_message(callback, 
         f"✏️ <b>Редактирование товара</b>\n\n"
         f"📝 <b>Название:</b> {product.name}\n"
         f"💰 <b>Цена:</b> {product.price}₾\n"
@@ -216,7 +218,7 @@ async def start_add_product(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Сначала добавьте категории!", show_alert=True)
         return
     
-    await callback.message.edit_text(
+    await safe_edit_message(callback, 
         "➕ <b>Добавление товара</b>\n\n"
         "Выберите категорию для товара:",
         reply_markup=get_category_selection_keyboard(categories),
@@ -256,7 +258,7 @@ async def select_category_for_product(callback: CallbackQuery, state: FSMContext
         InlineKeyboardButton(text="🔙 Управление товарами", callback_data="admin_products")
     ])
     
-    await callback.message.edit_text(
+    await safe_edit_message(callback, 
         f"➕ <b>Добавление товара</b>\n\n"
         f"📂 <b>Категория:</b> {category[2]} {category[1]}\n\n"
         f"🍓 Выберите категорию вкуса для товара:",
@@ -280,7 +282,7 @@ async def select_flavor_for_product(callback: CallbackQuery, state: FSMContext):
         [InlineKeyboardButton(text="🔙 Управление товарами", callback_data="admin_products")]
     ]
     
-    await callback.message.edit_text(
+    await safe_edit_message(callback, 
         f"➕ <b>Добавление товара</b>\n\n"
         f"📂 <b>Категория:</b> {category[2]} {category[1]}\n"
         f"🍓 <b>Вкус:</b> {flavor.emoji} {flavor.name}\n\n"
@@ -302,7 +304,7 @@ async def skip_flavor_selection(callback: CallbackQuery, state: FSMContext):
         [InlineKeyboardButton(text="🔙 Управление товарами", callback_data="admin_products")]
     ]
     
-    await callback.message.edit_text(
+    await safe_edit_message(callback, 
         f"➕ <b>Добавление товара</b>\n\n"
         f"📂 <b>Категория:</b> {category[2]} {category[1]}\n"
         f"🍓 <b>Вкус:</b> не указан\n\n"

@@ -13,6 +13,7 @@ class Database:
     def __init__(self):
         self.database_url = DATABASE_URL
         self._pool = None
+        self._last_cleanup_time = 0  # Кэш времени последней очистки
     
     async def init_pool(self):
         """Инициализация пула соединений"""
@@ -50,6 +51,12 @@ class Database:
         await self.init_pool()
         async with self._pool.acquire() as conn:
             return await conn.fetch(query, *params)
+    
+    async def fetchval(self, query, *params):
+        """Получение одного значения"""
+        await self.init_pool()
+        async with self._pool.acquire() as conn:
+            return await conn.fetchval(query, *params)
     
     # Методы для работы с пользователями
     async def add_user(self, user_id, username=None, first_name=None, language_code='ru'):
@@ -131,35 +138,61 @@ class Database:
             return await self.fetchall(query)
     
     async def get_products_by_category(self, category_id):
-        """Получение товаров по категории с учетом резервов"""
-        await self.cleanup_expired_reservations()
+        """Получение товаров по категории с учетом резервов (оптимизированная версия)"""
+        await self.cleanup_if_needed()  # Кэшированная очистка
         
+        # Получаем все товары категории сразу с расчетом доступного количества
         query = """
-        SELECT p.*, 
-               p.stock_quantity - COALESCE(SUM(c.quantity), 0) as available_quantity
+        SELECT 
+            p.*,
+            GREATEST(0, 
+                p.stock_quantity - 
+                COALESCE(cart_reserved.quantity, 0) - 
+                COALESCE(order_reserved.quantity, 0)
+            ) as available_quantity
         FROM products p
-        LEFT JOIN cart c ON p.id = c.product_id AND c.reserved_until > CURRENT_TIMESTAMP
+        LEFT JOIN (
+            SELECT 
+                product_id, 
+                SUM(quantity) as quantity
+            FROM cart
+            WHERE reserved_until > CURRENT_TIMESTAMP
+            GROUP BY product_id
+        ) cart_reserved ON p.id = cart_reserved.product_id
+        LEFT JOIN (
+            SELECT 
+                CAST(product_key AS INTEGER) as product_id,
+                SUM((reserved_products->>product_key)::integer) as quantity
+            FROM order_reservations ord_res
+            JOIN orders o ON ord_res.order_id = o.id
+            CROSS JOIN LATERAL jsonb_object_keys(reserved_products) as product_key
+            WHERE ord_res.reserved_until > CURRENT_TIMESTAMP 
+            AND o.status = 'waiting_payment'
+            GROUP BY product_key
+        ) order_reserved ON p.id = order_reserved.product_id
         WHERE p.category_id = $1 AND p.in_stock = true
-        GROUP BY p.id, p.name, p.price, p.description, p.photo, p.category_id, 
-                 p.in_stock, p.created_at, p.stock_quantity, p.flavor_category_id
-        HAVING p.stock_quantity - COALESCE(SUM(c.quantity), 0) > 0
         ORDER BY p.id
         """
         rows = await self.fetchall(query, category_id)
-        return [
-            Product(
-                id=row['id'],
-                name=row['name'],
-                price=row['price'],
-                description=row['description'],
-                photo=row['photo'],
-                category_id=row['category_id'],
-                in_stock=row['in_stock'],
-                created_at=row['created_at'],
-                stock_quantity=row['available_quantity'],  # Используем доступное количество
-                flavor_category_id=row.get('flavor_category_id')
-            ) for row in rows
-        ]
+        
+        products = []
+        for row in rows:
+            available_quantity = row['available_quantity']
+            # Фильтруем товары с доступным количеством > 0
+            if available_quantity > 0:
+                products.append(Product(
+                    id=row['id'],
+                    name=row['name'],
+                    price=row['price'],
+                    description=row['description'],
+                    photo=row['photo'],
+                    category_id=row['category_id'],
+                    in_stock=row['in_stock'],
+                    created_at=row['created_at'],
+                    stock_quantity=available_quantity,
+                    flavor_category_id=row.get('flavor_category_id')
+                ))
+        return products
     
     async def get_all_products(self):
         """Получение всех товаров (для админки)"""
@@ -195,6 +228,49 @@ class Database:
                 in_stock=row['in_stock'],
                 created_at=row['created_at'],
                 stock_quantity=row['stock_quantity'],
+                flavor_category_id=row.get('flavor_category_id')
+            )
+        return None
+    
+    async def get_product_with_availability(self, product_id):
+        """Получение товара с вычисленным доступным количеством (оптимизированная версия)"""
+        await self.cleanup_if_needed()  # Кэшированная очистка
+        
+        # Упрощенный запрос с скалярными подзапросами для одного товара
+        query = """
+        SELECT 
+            p.*,
+            GREATEST(0, 
+                p.stock_quantity - 
+                COALESCE((
+                    SELECT SUM(quantity) 
+                    FROM cart 
+                    WHERE product_id = $1 AND reserved_until > CURRENT_TIMESTAMP
+                ), 0) - 
+                COALESCE((
+                    SELECT SUM((reserved_products->>$2)::integer)
+                    FROM order_reservations ord_res
+                    JOIN orders o ON ord_res.order_id = o.id
+                    WHERE ord_res.reserved_until > CURRENT_TIMESTAMP 
+                    AND o.status = 'waiting_payment'
+                    AND reserved_products ? $2
+                ), 0)
+            ) as available_quantity
+        FROM products p
+        WHERE p.id = $1
+        """
+        row = await self.fetchone(query, product_id, str(product_id))
+        if row:
+            return Product(
+                id=row['id'],
+                name=row['name'],
+                price=row['price'],
+                description=row['description'],
+                photo=row['photo'],
+                category_id=row['category_id'],
+                in_stock=row['in_stock'],
+                created_at=row['created_at'],
+                stock_quantity=row['available_quantity'],
                 flavor_category_id=row.get('flavor_category_id')
             )
         return None
@@ -292,35 +368,61 @@ class Database:
         await self.execute("DELETE FROM flavor_categories WHERE id = $1", category_id)
     
     async def get_products_by_flavor(self, flavor_category_id: int) -> List[Product]:
-        """Получение всех товаров определенного вкуса с учетом резервов"""
-        await self.cleanup_expired_reservations()
+        """Получение всех товаров определенного вкуса с учетом резервов (оптимизированная версия)"""
+        await self.cleanup_if_needed()  # Кэшированная очистка
         
+        # Получаем все товары вкуса сразу с расчетом доступного количества
         query = """
-        SELECT p.*, 
-               p.stock_quantity - COALESCE(SUM(c.quantity), 0) as available_quantity
+        SELECT 
+            p.*,
+            GREATEST(0, 
+                p.stock_quantity - 
+                COALESCE(cart_reserved.quantity, 0) - 
+                COALESCE(order_reserved.quantity, 0)
+            ) as available_quantity
         FROM products p
-        LEFT JOIN cart c ON p.id = c.product_id AND c.reserved_until > CURRENT_TIMESTAMP
+        LEFT JOIN (
+            SELECT 
+                product_id, 
+                SUM(quantity) as quantity
+            FROM cart
+            WHERE reserved_until > CURRENT_TIMESTAMP
+            GROUP BY product_id
+        ) cart_reserved ON p.id = cart_reserved.product_id
+        LEFT JOIN (
+            SELECT 
+                CAST(product_key AS INTEGER) as product_id,
+                SUM((reserved_products->>product_key)::integer) as quantity
+            FROM order_reservations ord_res
+            JOIN orders o ON ord_res.order_id = o.id
+            CROSS JOIN LATERAL jsonb_object_keys(reserved_products) as product_key
+            WHERE ord_res.reserved_until > CURRENT_TIMESTAMP 
+            AND o.status = 'waiting_payment'
+            GROUP BY product_key
+        ) order_reserved ON p.id = order_reserved.product_id
         WHERE p.flavor_category_id = $1 AND p.in_stock = true
-        GROUP BY p.id, p.name, p.price, p.description, p.photo, p.category_id, 
-                 p.in_stock, p.created_at, p.stock_quantity, p.flavor_category_id
-        HAVING p.stock_quantity - COALESCE(SUM(c.quantity), 0) > 0
         ORDER BY p.name
         """
         rows = await self.fetchall(query, flavor_category_id)
-        return [
-            Product(
-                id=row['id'],
-                name=row['name'],
-                price=row['price'],
-                description=row['description'],
-                photo=row['photo'],
-                category_id=row['category_id'],
-                in_stock=row['in_stock'],
-                created_at=row['created_at'],
-                stock_quantity=row['available_quantity'],  # Используем доступное количество
-                flavor_category_id=row.get('flavor_category_id')
-            ) for row in rows
-        ]
+        
+        products = []
+        for row in rows:
+            available_quantity = row['available_quantity']
+            # Фильтруем товары с доступным количеством > 0
+            if available_quantity > 0:
+                products.append(Product(
+                    id=row['id'],
+                    name=row['name'],
+                    price=row['price'],
+                    description=row['description'],
+                    photo=row['photo'],
+                    category_id=row['category_id'],
+                    in_stock=row['in_stock'],
+                    created_at=row['created_at'],
+                    stock_quantity=available_quantity,
+                    flavor_category_id=row.get('flavor_category_id')
+                ))
+        return products
     
     async def update_product_flavor(self, product_id: int, flavor_category_id: Optional[int]):
         """Обновление категории вкуса у товара"""
@@ -360,6 +462,15 @@ class Database:
         rows = await self.fetchall(query, user_id)
         return [CartItem(*row) for row in rows]
     
+    async def get_product_quantity_in_cart(self, user_id, product_id) -> int:
+        """Быстрое получение количества конкретного товара в корзине пользователя"""
+        query = """SELECT COALESCE(quantity, 0) 
+                   FROM cart 
+                   WHERE user_id = $1 AND product_id = $2 AND reserved_until > CURRENT_TIMESTAMP"""
+        
+        row = await self.fetchone(query, user_id, product_id)
+        return row[0] if row else 0
+    
     async def remove_from_cart(self, user_id, product_id):
         """Удаление товара из корзины"""
         query = "DELETE FROM cart WHERE user_id = $1 AND product_id = $2"
@@ -395,10 +506,27 @@ class Database:
             await self.execute(query, quantity, user_id, product_id)
             return True
     
+    async def update_cart_quantity_fast(self, user_id, product_id, quantity):
+        """Быстрое обновление количества без дополнительных проверок (для оптимизации)"""
+        if quantity <= 0:
+            await self.remove_from_cart(user_id, product_id)
+        else:
+            query = """UPDATE cart SET quantity = $1, reserved_until = CURRENT_TIMESTAMP + INTERVAL '15 minutes' 
+                       WHERE user_id = $2 AND product_id = $3"""
+            await self.execute(query, quantity, user_id, product_id)
+        return True
+    
     # Методы для работы с заказами
     async def create_order(self, user_id, products, total_price, delivery_zone, delivery_price, phone, address, latitude=None, longitude=None):
-        """Создание заказа"""
+        """Создание заказа с резервированием товаров"""
         import random
+        
+        # Проверяем наличие всех товаров перед созданием заказа
+        for product in products:
+            available = await self.get_available_product_quantity(product['id'])
+            if available < product['quantity']:
+                logger.error(f"Недостаточно товара {product['id']} для заказа. Доступно: {available}, требуется: {product['quantity']}")
+                return None
         
         # Генерируем уникальный номер заказа (5-6 цифр)
         while True:
@@ -422,6 +550,17 @@ class Database:
         if not result:
             return None
         
+        order_id = result['id']
+        
+        # Создаем резервирование товаров на 5 минут
+        products_reservation = {}
+        for product in products:
+            products_reservation[str(product['id'])] = product['quantity']
+        
+        await self.create_order_reservation(order_id, products_reservation)
+        
+        logger.info(f"Заказ #{order_number} создан с резервированием товаров на 5 минут")
+        
         # Товары НЕ списываются при создании заказа
         # Списание происходит только при подтверждении платежа админом
         
@@ -439,10 +578,50 @@ class Database:
         row = await self.fetchone(query, order_number)
         return Order(*row) if row else None
     
-    async def get_user_orders(self, user_id):
-        """Получение заказов пользователя"""
-        query = "SELECT id, order_number, user_id, products, total_price, delivery_zone, delivery_price, phone, address, status, payment_screenshot, created_at, latitude, longitude FROM orders WHERE user_id = $1 ORDER BY created_at DESC"
-        rows = await self.fetchall(query, user_id)
+    async def get_user_orders(self, user_id, status_filter=None, search_query=None, limit=50):
+        """Получение заказов пользователя с фильтрацией и поиском"""
+        conditions = ["user_id = $1"]
+        params = [user_id]
+        param_count = 1
+        
+        # Фильтр по статусу
+        if status_filter:
+            if status_filter == 'active':
+                conditions.append(f"status IN ('waiting_payment', 'payment_check', 'paid', 'shipping')")
+            elif status_filter == 'completed':
+                conditions.append(f"status = 'delivered'")
+            elif status_filter == 'cancelled':
+                conditions.append(f"status = 'cancelled'")
+            elif status_filter != 'all':
+                param_count += 1
+                conditions.append(f"status = ${param_count}")
+                params.append(status_filter)
+        
+        # Поиск по номеру заказа
+        if search_query:
+            try:
+                order_number = int(search_query)
+                param_count += 1
+                conditions.append(f"order_number = ${param_count}")
+                params.append(order_number)
+            except ValueError:
+                # Если не число, ищем в товарах
+                param_count += 1
+                conditions.append(f"products ILIKE ${param_count}")
+                params.append(f'%{search_query}%')
+        
+        where_clause = " AND ".join(conditions)
+        query = f"""
+        SELECT id, order_number, user_id, products, total_price, delivery_zone, delivery_price, 
+               phone, address, status, payment_screenshot, created_at, latitude, longitude 
+        FROM orders 
+        WHERE {where_clause} 
+        ORDER BY created_at DESC 
+        LIMIT ${param_count + 1}
+        """
+        params.append(limit)
+        
+        rows = await self.fetchall(query, *params)
         return [Order(*row) for row in rows]
     
     async def get_user_orders_count(self, user_id) -> int:
@@ -451,6 +630,27 @@ class Database:
         row = await self.fetchone(query, user_id)
         return row[0] if row else 0
     
+    async def get_user_orders_stats(self, user_id) -> dict:
+        """Получение статистики заказов пользователя по статусам"""
+        query = """
+        SELECT 
+            COUNT(CASE WHEN status IN ('waiting_payment', 'payment_check', 'paid', 'shipping') THEN 1 END) as active,
+            COUNT(CASE WHEN status = 'delivered' THEN 1 END) as completed,
+            COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled,
+            COUNT(*) as total
+        FROM orders 
+        WHERE user_id = $1
+        """
+        row = await self.fetchone(query, user_id)
+        if row:
+            return {
+                'active': row['active'],
+                'completed': row['completed'], 
+                'cancelled': row['cancelled'],
+                'total': row['total']
+            }
+        return {'active': 0, 'completed': 0, 'cancelled': 0, 'total': 0}
+    
     async def get_order_items(self, order_id):
         """Получение товаров заказа"""
         # Пока что возвращаем пустой список, так как структура заказов хранится в JSON
@@ -458,9 +658,50 @@ class Database:
         return []
     
     async def update_order_status(self, order_id, status):
-        """Обновление статуса заказа"""
+        """Обновление статуса заказа с обработкой резервирования и уведомлениями"""
+        old_order = await self.get_order(order_id)
+        if not old_order:
+            return
+        
+        old_status = old_order.status
+        
+        # Обновляем статус
         query = "UPDATE orders SET status = $1 WHERE id = $2"
         await self.execute(query, status, order_id)
+        
+        # Если заказ подтверждается (переходит в paid), списываем товары и убираем резерв
+        if status == 'paid' and old_order.status in ['waiting_payment', 'payment_check']:
+            products_data = old_order.products_data
+            for product in products_data:
+                await self.decrease_product_quantity(product['id'], product['quantity'])
+            
+            # Убираем резервирование
+            await self.remove_order_reservation(order_id)
+            logger.info(f"Товары списаны и резерв снят для заказа #{old_order.order_number}")
+        
+        # Если заказ отменяется, убираем резерв
+        elif status == 'cancelled':
+            await self.remove_order_reservation(order_id)
+            logger.info(f"Резерв снят для отмененного заказа #{old_order.order_number}")
+        
+        # Если заказ возвращается в ожидание оплаты, продлеваем резерв
+        elif status == 'waiting_payment' and old_order.status != 'waiting_payment':
+            # Создаем новый резерв на 5 минут
+            products_data = old_order.products_data
+            products_reservation = {}
+            for product in products_data:
+                products_reservation[str(product['id'])] = product['quantity']
+            await self.create_order_reservation(order_id, products_reservation)
+            logger.info(f"Создан новый резерв для заказа #{old_order.order_number}")
+        
+        # Отправляем уведомление об изменении статуса (если статус действительно изменился)
+        if old_status != status:
+            try:
+                from notifications import notification_system
+                if notification_system:
+                    await notification_system.notify_status_change(order_id, old_status, status)
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления об изменении статуса: {e}")
     
     async def update_order_screenshot(self, order_id, screenshot):
         """Обновление скриншота оплаты"""
@@ -469,8 +710,14 @@ class Database:
     
     async def update_order_status_by_number(self, order_number, status):
         """Обновление статуса заказа по номеру заказа"""
-        query = "UPDATE orders SET status = $1 WHERE order_number = $2"
-        await self.execute(query, status, order_number)
+        # Получаем ID заказа
+        order = await self.get_order_by_number(order_number)
+        if order:
+            await self.update_order_status(order.id, status)
+        else:
+            # Если заказ не найден, просто обновляем статус без логики резервирования
+            query = "UPDATE orders SET status = $1 WHERE order_number = $2"
+            await self.execute(query, status, order_number)
     
     async def update_order_screenshot_by_number(self, order_number, screenshot):
         """Обновление скриншота оплаты по номеру заказа"""
@@ -554,24 +801,42 @@ class Database:
     
     # Методы для резервирования товаров
     async def get_available_product_quantity(self, product_id):
-        """Получить доступное количество товара с учетом резервов в корзинах"""
+        """Получить доступное количество товара с учетом резервов в корзинах и заказах"""
         # Очищаем просроченные резервы
         await self.cleanup_expired_reservations()
+        await self.cleanup_expired_order_reservations()
         
-        query = """
-        SELECT p.stock_quantity - COALESCE(SUM(c.quantity), 0) as available
-        FROM products p
-        LEFT JOIN cart c ON p.id = c.product_id AND c.reserved_until > CURRENT_TIMESTAMP
-        WHERE p.id = $1 AND p.in_stock = true
-        GROUP BY p.stock_quantity
-        """
+        # Получаем количество в корзинах
+        cart_reserved = await self.get_reserved_quantity(product_id)
+        
+        # Получаем количество в заказах
+        order_reserved = await self.get_reserved_quantity_by_orders(product_id)
+        
+        # Получаем общий stock товара
+        query = "SELECT stock_quantity FROM products WHERE id = $1 AND in_stock = true"
         row = await self.fetchone(query, product_id)
-        return row['available'] if row else 0
+        if not row:
+            return 0
+        
+        total_stock = row['stock_quantity']
+        available = total_stock - cart_reserved - order_reserved
+        return max(0, available)
     
     async def cleanup_expired_reservations(self):
         """Очистка просроченных резервов в корзинах"""
         query = "DELETE FROM cart WHERE reserved_until <= CURRENT_TIMESTAMP"
         await self.execute(query)
+    
+    async def cleanup_if_needed(self):
+        """Оптимизированная очистка с кэшированием - выполняется максимум раз в 30 секунд"""
+        import time
+        current_time = time.time()
+        
+        # Выполняем cleanup только если прошло больше 30 секунд с последнего раза
+        if current_time - self._last_cleanup_time > 30:
+            await self.cleanup_expired_reservations()
+            await self.cleanup_expired_order_reservations()
+            self._last_cleanup_time = current_time
     
     async def get_reserved_quantity(self, product_id):
         """Получить зарезервированное количество товара"""
@@ -600,6 +865,88 @@ class Database:
                 'minutes_left': max(0, int(row['minutes_left']))
             }
         return None
+    
+    # Методы для работы с резервированием товаров в заказах
+    async def create_order_reservation(self, order_id, products_data):
+        """Создать резервирование товаров для заказа на 5 минут"""
+        import json
+        
+        query = """
+        INSERT INTO order_reservations (order_id, reserved_products) 
+        VALUES ($1, $2)
+        ON CONFLICT (order_id) DO UPDATE SET 
+            reserved_products = $2,
+            reserved_until = CURRENT_TIMESTAMP + INTERVAL '5 minutes'
+        """
+        await self.execute(query, order_id, json.dumps(products_data))
+    
+    async def get_order_reservation(self, order_id):
+        """Получить резервирование товаров для заказа"""
+        query = """
+        SELECT reserved_products, reserved_until,
+               EXTRACT(EPOCH FROM (reserved_until - CURRENT_TIMESTAMP))/60 as minutes_left
+        FROM order_reservations 
+        WHERE order_id = $1 AND reserved_until > CURRENT_TIMESTAMP
+        """
+        row = await self.fetchone(query, order_id)
+        if row:
+            import json
+            return {
+                'products': json.loads(row['reserved_products']),
+                'reserved_until': row['reserved_until'],
+                'minutes_left': max(0, int(row['minutes_left']))
+            }
+        return None
+    
+    async def remove_order_reservation(self, order_id):
+        """Удалить резервирование товаров для заказа"""
+        query = "DELETE FROM order_reservations WHERE order_id = $1"
+        await self.execute(query, order_id)
+    
+    async def cleanup_expired_order_reservations(self):
+        """Очистка просроченных резервов заказов и отмена заказов"""
+        # Получаем просроченные заказы
+        query = """
+        SELECT o.id, o.order_number, ord_res.reserved_products
+        FROM orders o
+        JOIN order_reservations ord_res ON o.id = ord_res.order_id
+        WHERE ord_res.reserved_until <= CURRENT_TIMESTAMP AND o.status = 'waiting_payment'
+        """
+        expired_orders = await self.fetchall(query)
+        
+        # Отменяем просроченные заказы
+        for order in expired_orders:
+            await self.update_order_status(order['id'], 'cancelled')
+            logger.info(f"Заказ #{order['order_number']} отменен из-за просрочки резерва")
+        
+        # Удаляем просроченные резервы
+        query = "DELETE FROM order_reservations WHERE reserved_until <= CURRENT_TIMESTAMP"
+        await self.execute(query)
+    
+    async def extend_order_reservation(self, order_id):
+        """Продлить резервирование заказа на 5 минут"""
+        query = """
+        UPDATE order_reservations 
+        SET reserved_until = CURRENT_TIMESTAMP + INTERVAL '5 minutes'
+        WHERE order_id = $1 AND reserved_until > CURRENT_TIMESTAMP
+        """
+        await self.execute(query, order_id)
+    
+    async def get_reserved_quantity_by_orders(self, product_id):
+        """Получить количество товара, зарезервированного в заказах"""
+        await self.cleanup_expired_order_reservations()
+        
+        query = """
+        SELECT COALESCE(SUM((reserved_products->>$2)::integer), 0) as reserved
+        FROM order_reservations ord_res
+        JOIN orders o ON ord_res.order_id = o.id
+        WHERE ord_res.reserved_until > CURRENT_TIMESTAMP 
+        AND o.status = 'waiting_payment'
+        AND reserved_products ? $1
+        """
+        
+        row = await self.fetchone(query, str(product_id), str(product_id))
+        return row['reserved'] if row else 0
 
 
 async def init_db():
@@ -707,6 +1054,15 @@ async def init_db():
         first_name TEXT,
         added_by BIGINT,
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+    
+    # Таблица резервирования товаров для заказов в ожидании оплаты
+    await conn.execute('''CREATE TABLE IF NOT EXISTS order_reservations (
+        order_id INTEGER PRIMARY KEY,
+        reserved_products JSONB NOT NULL,
+        reserved_until TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP + INTERVAL '5 minutes',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE CASCADE
     )''')
     
     await conn.close()

@@ -133,21 +133,18 @@ class CatalogPage(BasePage):
         }
     
     async def _render_product(self, user_id: int, product_id: int, from_category: Optional[int] = None) -> Dict[str, Any]:
-        """Отрендерить карточку товара"""
-        product = await db.get_product(product_id)
+        """Отрендерить карточку товара (оптимизированная версия)"""
+        # Оптимизированно: получаем товар с уже вычисленным доступным количеством
+        product = await db.get_product_with_availability(product_id)
         if not product:
             return await self._render_categories(user_id)
         
-        # Получаем информацию о корзине
-        cart_items = await db.get_cart(user_id)
-        quantity_in_cart = 0
-        for item in cart_items:
-            if item.product_id == product_id:
-                quantity_in_cart = item.quantity
-                break
+        # Оптимизированно: получаем только количество товара в корзине, не всю корзину
+        quantity_in_cart = await db.get_product_quantity_in_cart(user_id, product_id)
         
-        # Используем унифицированный форматтер
-        text = await format_product_card(product, quantity_in_cart, user_id)
+        # Используем быстрый форматтер без дополнительных запросов к БД
+        from utils.formatters import format_product_card_fast
+        text = format_product_card_fast(product, quantity_in_cart, user_id)
         
         result = {
             'text': text,

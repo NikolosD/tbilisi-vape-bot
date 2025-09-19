@@ -20,7 +20,8 @@ async def safe_edit_message(
     parse_mode: str = 'HTML'
 ) -> bool:
     """
-    Safely edit a message, handling both text and photo messages
+    Safely edit a message, handling both text and photo messages.
+    If editing fails, sends a new message as fallback.
     
     Args:
         callback: The callback query to respond to
@@ -48,11 +49,31 @@ async def safe_edit_message(
             )
         return True
     except TelegramBadRequest as e:
-        logger.error(f"Failed to edit message: {e}")
-        return False
+        logger.warning(f"Failed to edit message, sending new one: {e}")
+        # Fallback: send a new message
+        try:
+            await callback.message.answer(
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+            return True
+        except Exception as fallback_e:
+            logger.error(f"Failed to send fallback message: {fallback_e}")
+            return False
     except Exception as e:
         logger.error(f"Unexpected error editing message: {e}")
-        return False
+        # Fallback: send a new message
+        try:
+            await callback.message.answer(
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+            return True
+        except Exception as fallback_e:
+            logger.error(f"Failed to send fallback message: {fallback_e}")
+            return False
 
 
 async def safe_delete_message(

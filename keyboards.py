@@ -117,25 +117,24 @@ def get_category_products_keyboard(products, category_id, user_id=None):
 
 # Асинхронная версия клавиатуры товаров с учетом резервов
 async def get_category_products_keyboard_with_stock(products, category_id, user_id=None):
-    from database import db
-    
     keyboard = []
     for product in products:
         # Проверяем, является ли product объектом Product или кортежем
         if hasattr(product, 'name'):  # Это объект Product
             name, price, product_id = product.name, product.price, product.id
             in_stock = getattr(product, 'in_stock', True)
-        else:  # Это кортеж (старый формат)
+            # Используем уже вычисленное количество из объекта Product
+            available_quantity = getattr(product, 'stock_quantity', 0)
+        else:  # Это кортеж (старый формат) - DEPRECATED
             name, price, product_id = product[1], product[2], product[0]
             in_stock = True
-        
-        # Получаем доступное количество с учетом резервов
-        if in_stock:
+            # Для старого формата пока оставляем запрос к БД (но это не должно использоваться)
+            from database import db
             available_quantity = await db.get_available_product_quantity(product_id)
-            if available_quantity > 0:
-                button_text = f"{name} - {price}₾ (📦 {available_quantity} {_('product.pieces', user_id=user_id)})"
-            else:
-                button_text = f"{name} - {price}₾ (❌ {_('product.out_of_stock', user_id=user_id)})"
+        
+        # Формируем текст кнопки на основе доступного количества
+        if in_stock and available_quantity > 0:
+            button_text = f"{name} - {price}₾ (📦 {available_quantity} {_('product.pieces', user_id=user_id)})"
         else:
             button_text = f"{name} - {price}₾ (❌ {_('product.out_of_stock', user_id=user_id)})"
             
@@ -160,11 +159,7 @@ def get_product_card_keyboard(product_id, in_cart=False, from_category=None):
     
     if in_cart:
         keyboard = [
-            [
-                InlineKeyboardButton(text="➖", callback_data=f"cart_decrease_{product_id}"),
-                InlineKeyboardButton(text="🔢", callback_data=f"cart_input_qty_{product_id}"),
-                InlineKeyboardButton(text="➕", callback_data=f"cart_increase_{product_id}")
-            ],
+            [InlineKeyboardButton(text="🔢 Изменить количество", callback_data=f"cart_input_qty_{product_id}")],
             [InlineKeyboardButton(text=_("product.remove_from_cart"), callback_data=f"cart_remove_{product_id}")],
             [
                 InlineKeyboardButton(text=_("menu.cart"), callback_data="cart"),
@@ -199,9 +194,8 @@ def get_cart_keyboard(cart_items):
             InlineKeyboardButton(text=f"{item.name} ({item.quantity})", callback_data=f"noop")
         ])
         keyboard.append([
-            InlineKeyboardButton(text="➖", callback_data=f"cart_decrease_{item.product_id}"),
-            InlineKeyboardButton(text="🔢", callback_data=f"cart_input_qty_{item.product_id}"),
-            InlineKeyboardButton(text="➕", callback_data=f"cart_increase_{item.product_id}")
+            InlineKeyboardButton(text="🔢 Изменить", callback_data=f"cart_input_qty_{item.product_id}"),
+            InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"cart_remove_{item.product_id}")
         ])
     
     if cart_items:

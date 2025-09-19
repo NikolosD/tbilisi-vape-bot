@@ -6,6 +6,7 @@ from aiogram.fsm.state import State, StatesGroup
 from database import db
 from filters.admin import admin_filter
 from keyboards import get_admin_categories_keyboard
+from utils.safe_operations import safe_edit_message
 
 router = Router()
 

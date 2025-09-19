@@ -89,13 +89,23 @@ async def start_message_to_admin(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     
     await callback.answer()
-    await callback.message.edit_text(
-        _("contact.message_form", user_id=user_id),
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=_("common.cancel", user_id=user_id), callback_data="contact")]
-        ]),
-        parse_mode='HTML'
-    )
+    try:
+        await callback.message.edit_text(
+            _("contact.message_form", user_id=user_id),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=_("common.cancel", user_id=user_id), callback_data="contact")]
+            ]),
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.warning(f"Не удалось отредактировать сообщение контакта: {e}")
+        await callback.message.answer(
+            _("contact.message_form", user_id=user_id),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=_("common.cancel", user_id=user_id), callback_data="contact")]
+            ]),
+            parse_mode='HTML'
+        )
     
     await state.set_state(ProfileStates.waiting_admin_message)
 

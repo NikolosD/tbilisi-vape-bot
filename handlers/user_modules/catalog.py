@@ -9,6 +9,7 @@ from i18n import _
 from button_filters import is_catalog_button
 from pages.manager import page_manager
 from utils.formatters import format_product_card
+from utils.loader import show_simple_loader, hide_simple_loader
 
 logger = logging.getLogger(__name__)
 
@@ -38,23 +39,47 @@ async def callback_catalog(callback: CallbackQuery):
 async def show_category_products(callback: CallbackQuery):
     """Показать товары выбранной категории"""
     category_id = int(callback.data.split("_")[1])
-    await page_manager.catalog.show_from_callback(callback, category_id=category_id)
+    loader_id = await show_simple_loader(callback, callback.from_user.id, "Загружаем товары...")
+    try:
+        result = await page_manager.catalog.render(callback.from_user.id, category_id=category_id)
+        await hide_simple_loader(loader_id, callback, result['text'], result['keyboard'])
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке товаров категории: {e}")
+        await hide_simple_loader(loader_id, callback, "❌ Произошла ошибка. Попробуйте снова.")
 
 @router.callback_query(F.data == "catalog_brands")
 async def callback_catalog_brands(callback: CallbackQuery):
     """Показать каталог по брендам"""
-    await page_manager.catalog.show_from_callback(callback, catalog_type='brands')
+    loader_id = await show_simple_loader(callback, callback.from_user.id, "Загружаем бренды...")
+    try:
+        result = await page_manager.catalog.render(callback.from_user.id, catalog_type='brands')
+        await hide_simple_loader(loader_id, callback, result['text'], result['keyboard'])
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке брендов: {e}")
+        await hide_simple_loader(loader_id, callback, "❌ Произошла ошибка. Попробуйте снова.")
 
 @router.callback_query(F.data == "catalog_flavors")
 async def callback_catalog_flavors(callback: CallbackQuery):
     """Показать каталог по вкусам"""
-    await page_manager.catalog.show_from_callback(callback, catalog_type='flavors')
+    loader_id = await show_simple_loader(callback, callback.from_user.id, "Загружаем вкусы...")
+    try:
+        result = await page_manager.catalog.render(callback.from_user.id, catalog_type='flavors')
+        await hide_simple_loader(loader_id, callback, result['text'], result['keyboard'])
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке вкусов: {e}")
+        await hide_simple_loader(loader_id, callback, "❌ Произошла ошибка. Попробуйте снова.")
 
 @router.callback_query(F.data.startswith("flavor_"))
 async def show_flavor_products(callback: CallbackQuery):
     """Показать товары выбранного вкуса"""
     flavor_id = int(callback.data.split("_")[1])
-    await page_manager.catalog.show_from_callback(callback, flavor_id=flavor_id)
+    loader_id = await show_simple_loader(callback, callback.from_user.id, "Загружаем товары...")
+    try:
+        result = await page_manager.catalog.render(callback.from_user.id, flavor_id=flavor_id)
+        await hide_simple_loader(loader_id, callback, result['text'], result['keyboard'])
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке товаров вкуса: {e}")
+        await hide_simple_loader(loader_id, callback, "❌ Произошла ошибка. Попробуйте снова.")
 
 @router.callback_query(F.data.startswith("product_"))
 async def show_product(callback: CallbackQuery):
@@ -72,7 +97,35 @@ async def show_product(callback: CallbackQuery):
             # Пришли из обычной категории
             from_category = int(data_parts[3])
     
-    await page_manager.catalog.show_from_callback(callback, product_id=product_id, from_category=from_category)
+    loader_id = await show_simple_loader(callback, callback.from_user.id, "Загружаем товар...")
+    try:
+        result = await page_manager.catalog.render(callback.from_user.id, product_id=product_id, from_category=from_category)
+        
+        # Если есть фото, нужно обработать отдельно
+        if result.get('photo'):
+            # Скрываем лоадер, затем отправляем фото с текстом
+            await hide_simple_loader(loader_id, callback, "📸 Загружаем фото...")
+            try:
+                await callback.message.delete()
+                await callback.bot.send_photo(
+                    chat_id=callback.message.chat.id,
+                    photo=result['photo'],
+                    caption=result['text'],
+                    reply_markup=result['keyboard'],
+                    parse_mode='HTML'
+                )
+            except Exception:
+                # Если не удалось с фото, показываем только текст
+                await callback.message.answer(
+                    result['text'],
+                    reply_markup=result['keyboard'],
+                    parse_mode='HTML'
+                )
+        else:
+            await hide_simple_loader(loader_id, callback, result['text'], result['keyboard'])
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке товара: {e}")
+        await hide_simple_loader(loader_id, callback, "❌ Произошла ошибка. Попробуйте снова.")
 
 
 

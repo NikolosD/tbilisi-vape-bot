@@ -43,6 +43,41 @@ async def format_product_card(product, quantity_in_cart: int = 0, user_id: Optio
     
     return text
 
+def format_product_card_fast(product, quantity_in_cart: int = 0, user_id: Optional[int] = None) -> str:
+    """
+    Быстрый форматтер карточки товара (без дополнительных запросов к БД)
+    
+    Args:
+        product: Product объект с уже вычисленным stock_quantity (доступное количество)
+        quantity_in_cart: Количество товара в корзине пользователя
+        user_id: ID пользователя для переводов
+    
+    Returns:
+        Отформатированная строка товара
+    """
+    text = f"🛍️ <b>{product.name}</b>\n\n"
+    
+    if product.description:
+        text += f"{product.description}\n\n"
+    
+    text += f"💰 <b>{_('product.price', user_id=user_id)}</b> {product.price}₾\n"
+    
+    # Информация о наличии (используем уже вычисленное количество)
+    if product.in_stock:
+        available_quantity = product.stock_quantity  # Уже вычислено в SQL запросе
+        if available_quantity > 0:
+            text += f"📦 <b>{_('product.in_stock', user_id=user_id)}:</b> {available_quantity} {_('product.pieces', user_id=user_id)}\n"
+        else:
+            text += f"❌ <b>{_('product.out_of_stock', user_id=user_id)}</b>\n"
+    else:
+        text += f"❌ <b>{_('product.out_of_stock', user_id=user_id)}</b>\n"
+    
+    # Информация о корзине
+    if quantity_in_cart > 0:
+        text += f"🛒 <b>{_('product.in_cart', user_id=user_id)}:</b> {quantity_in_cart} {_('product.pieces', user_id=user_id)}"
+    
+    return text
+
 
 def format_cart_display(cart_items: List, user_id: Optional[int] = None) -> tuple[str, float]:
     """

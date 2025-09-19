@@ -30,6 +30,7 @@ from i18n import _
 from middleware import AntiSpamMiddleware
 from anti_spam import anti_spam
 from reservation_scheduler import reservation_scheduler
+from notifications import init_notification_system
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -351,6 +352,10 @@ async def main():
         logger.info("Загрузка языков пользователей...")
         from i18n import i18n
         await i18n.load_user_languages_from_db()
+        
+        # Инициализируем систему уведомлений
+        logger.info("Инициализация системы уведомлений...")
+        init_notification_system(bot)
         
         # Запускаем планировщик резервирования
         logger.info("Запуск планировщика резервирования товаров...")

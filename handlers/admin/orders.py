@@ -1,3 +1,4 @@
+import logging
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
@@ -10,6 +11,8 @@ from keyboards import get_admin_order_actions_keyboard
 from i18n import _
 from utils.loader import with_loader
 from handlers.user_modules.cart import delete_message_after_delay
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -65,14 +68,25 @@ async def admin_all_orders_pagination(callback: CallbackQuery):
 async def admin_search_order(callback: CallbackQuery, state: FSMContext):
     """Начать поиск заказа по номеру"""
     await state.set_state(OrderStates.waiting_order_search)
-    await callback.message.edit_text(
-        "🔍 <b>Поиск заказа</b>\n\n"
-        "Введите номер заказа для поиска:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Все заказы", callback_data="admin_all_orders")]
-        ]),
-        parse_mode='HTML'
-    )
+    try:
+        await callback.message.edit_text(
+            "🔍 <b>Поиск заказа</b>\n\n"
+            "Введите номер заказа для поиска:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Все заказы", callback_data="admin_all_orders")]
+            ]),
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.warning(f"Не удалось отредактировать сообщение поиска заказов: {e}")
+        await callback.message.answer(
+            "🔍 <b>Поиск заказа</b>\n\n"
+            "Введите номер заказа для поиска:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Все заказы", callback_data="admin_all_orders")]
+            ]),
+            parse_mode='HTML'
+        )
 
 async def admin_all_orders_page(callback: CallbackQuery, page: int):
     """Отобразить страницу всех заказов"""
@@ -114,7 +128,11 @@ async def admin_all_orders_page(callback: CallbackQuery, page: int):
     for order in pagination_info['items']:
         status_emoji = "⏳" if order.status == "waiting_payment" else "💰" if order.status == "payment_check" else "✅" if order.status == "paid" else "🚚" if order.status == "shipping" else "📦" if order.status == "delivered" else "❌"
         text += f"{status_emoji} <b>№{order.order_number}</b> - {order.total_price}₾\n"
-        text += f"📅 {order.created_at.strftime('%d.%m %H:%M')} | 👤 ID:{order.user_id}\n\n"
+        # Конвертируем время в местную временную зону (Tbilisi GMT+4)
+        from datetime import timezone, timedelta
+        tbilisi_tz = timezone(timedelta(hours=4))
+        order_time = order.created_at.replace(tzinfo=timezone.utc).astimezone(tbilisi_tz)
+        text += f"📅 {order_time.strftime('%d.%m %H:%M')} | 👤 ID:{order.user_id}\n\n"
 
     def order_button_generator(order, index):
         status_emoji = "⏳" if order.status == "waiting_payment" else "💰" if order.status == "payment_check" else "✅" if order.status == "paid" else "🚚" if order.status == "shipping" else "📦" if order.status == "delivered" else "❌"
@@ -197,10 +215,18 @@ async def reject_payment(callback: CallbackQuery, state: FSMContext):
         [InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin_order_{order_id}")]
     ])
     
-    if callback.message.photo:
-        await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode='HTML')
-    else:
-        await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode='HTML')
+    try:
+        if callback.message.photo:
+            await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode='HTML')
+        else:
+            await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode='HTML')
+    except Exception as e:
+        logger.warning(f"Не удалось отредактировать сообщение отклонения заказа: {e}")
+        await callback.message.answer(
+            text,
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
     
     await state.set_state(OrderStates.waiting_rejection_reason)
 
@@ -234,6 +260,11 @@ async def show_admin_order(callback: CallbackQuery):
         'cancelled': '❌ Отменен'
     }
     
+    # Конвертируем время в местную временную зону (Tbilisi GMT+4)
+    from datetime import timezone, timedelta
+    tbilisi_tz = timezone(timedelta(hours=4))
+    order_time = order.created_at.replace(tzinfo=timezone.utc).astimezone(tbilisi_tz)
+    
     from i18n import i18n
     user_language = i18n.get_user_language(order.user_id)
     language_names = {'ru': 'Русский', 'ka': 'ქართული', 'en': 'English'}
@@ -258,7 +289,7 @@ async def show_admin_order(callback: CallbackQuery):
 🚚 <b>Доставка:</b> {zone_info['name']} - {order.delivery_price}₾
 📍 <b>Адрес:</b> {order.address}
 📱 <b>Телефон:</b> {order.phone}
-📅 <b>Дата:</b> {str(order.created_at)[:16]}
+📅 <b>Дата:</b> {order_time.strftime('%Y-%m-%d %H:%M')}
 
 💰 <b>Итого: {order.total_price}₾</b>
 
@@ -274,17 +305,33 @@ async def show_admin_order(callback: CallbackQuery):
                 parse_mode='HTML'
             )
         except:
+            try:
+                await callback.message.edit_text(
+                    order_text + "\n\n📸 Скриншот оплаты прикреплен",
+                    reply_markup=get_admin_order_actions_keyboard(order_id, order.status),
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.warning(f"Не удалось отредактировать сообщение заказа со скриншотом: {e}")
+                await callback.message.answer(
+                    order_text + "\n\n📸 Скриншот оплаты прикреплен",
+                    reply_markup=get_admin_order_actions_keyboard(order_id, order.status),
+                    parse_mode='HTML'
+                )
+    else:
+        try:
             await callback.message.edit_text(
-                order_text + "\n\n📸 Скриншот оплаты прикреплен",
+                order_text,
                 reply_markup=get_admin_order_actions_keyboard(order_id, order.status),
                 parse_mode='HTML'
             )
-    else:
-        await callback.message.edit_text(
-            order_text,
-            reply_markup=get_admin_order_actions_keyboard(order_id, order.status),
-            parse_mode='HTML'
-        )
+        except Exception as e:
+            logger.warning(f"Не удалось отредактировать сообщение заказа: {e}")
+            await callback.message.answer(
+                order_text,
+                reply_markup=get_admin_order_actions_keyboard(order_id, order.status),
+                parse_mode='HTML'
+            )
 
 @router.callback_query(F.data.startswith("admin_confirm_payment_"), admin_filter)
 async def confirm_payment(callback: CallbackQuery):
@@ -523,14 +570,25 @@ async def deliver_order(callback: CallbackQuery):
         await callback.answer(f"❌ Ошибка доставки: {e}", show_alert=True)
         return
     
-    await callback.message.edit_text(
-        "📋 <b>Управление заказами</b>",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📋 Все заказы", callback_data="admin_all_orders")],
-            [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")]
-        ]),
-        parse_mode='HTML'
-    )
+    try:
+        await callback.message.edit_text(
+            "📋 <b>Управление заказами</b>",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📋 Все заказы", callback_data="admin_all_orders")],
+                [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")]
+            ]),
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.warning(f"Не удалось отредактировать сообщение доставки заказа: {e}")
+        await callback.message.answer(
+            "📋 <b>Управление заказами</b>",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📋 Все заказы", callback_data="admin_all_orders")],
+                [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")]
+            ]),
+            parse_mode='HTML'
+        )
 
 @router.callback_query(F.data.startswith("admin_cancel_"), admin_filter)
 async def admin_cancel_order(callback: CallbackQuery):
@@ -598,11 +656,19 @@ async def change_order_status_menu(callback: CallbackQuery):
     
     keyboard.append([InlineKeyboardButton(text="🔙 К заказу", callback_data=f"admin_order_{order_id}")])
     
-    await callback.message.edit_text(
-        "📊 <b>Изменение статуса заказа</b>\n\nВыберите новый статус:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
-        parse_mode='HTML'
-    )
+    try:
+        await callback.message.edit_text(
+            "📊 <b>Изменение статуса заказа</b>\n\nВыберите новый статус:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.warning(f"Не удалось отредактировать сообщение изменения статуса: {e}")
+        await callback.message.answer(
+            "📊 <b>Изменение статуса заказа</b>\n\nВыберите новый статус:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+            parse_mode='HTML'
+        )
 
 @router.callback_query(F.data.startswith("set_status_"), admin_filter)  
 async def set_order_status(callback: CallbackQuery):
@@ -901,7 +967,11 @@ async def show_filtered_orders_page(callback: CallbackQuery, filter_type: str, p
     for order in pagination_info['items']:
         status_emoji = "⏳" if order.status == "waiting_payment" else "💰" if order.status == "payment_check" else "✅" if order.status == "paid" else "🚚" if order.status == "shipping" else "📦" if order.status == "delivered" else "❌"
         text += f"{status_emoji} <b>№{order.order_number}</b> - {order.total_price}₾\n"
-        text += f"📅 {order.created_at.strftime('%d.%m %H:%M')} | 👤 ID:{order.user_id}\n\n"
+        # Конвертируем время в местную временную зону (Tbilisi GMT+4)
+        from datetime import timezone, timedelta
+        tbilisi_tz = timezone(timedelta(hours=4))
+        order_time = order.created_at.replace(tzinfo=timezone.utc).astimezone(tbilisi_tz)
+        text += f"📅 {order_time.strftime('%d.%m %H:%M')} | 👤 ID:{order.user_id}\n\n"
     
     def order_button_generator(order, index):
         status_emoji = "⏳" if order.status == "waiting_payment" else "💰" if order.status == "payment_check" else "✅" if order.status == "paid" else "🚚" if order.status == "shipping" else "📦" if order.status == "delivered" else "❌"
@@ -979,7 +1049,11 @@ async def process_order_search(message: Message, state: FSMContext):
             text += f"{status_emoji} <b>Заказ №{order.order_number}</b>\n"
             text += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             text += f"👤 <b>Клиент ID:</b> {order.user_id}\n"
-            text += f"📅 <b>Дата:</b> {order.created_at.strftime('%d.%m.%Y %H:%M')}\n"
+            # Конвертируем время в местную временную зону (Tbilisi GMT+4)
+            from datetime import timezone, timedelta
+            tbilisi_tz = timezone(timedelta(hours=4))
+            order_time = order.created_at.replace(tzinfo=timezone.utc).astimezone(tbilisi_tz)
+            text += f"📅 <b>Дата:</b> {order_time.strftime('%d.%m.%Y %H:%M')}\n"
             text += f"📊 <b>Статус:</b> {order.status}\n"
             text += f"💰 <b>Сумма:</b> {order.total_price}₾\n\n"
             

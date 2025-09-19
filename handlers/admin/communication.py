@@ -6,6 +6,7 @@ from aiogram.fsm.state import State, StatesGroup
 from database import db
 from filters.admin import admin_filter
 from i18n import _
+from utils.safe_operations import safe_edit_message
 
 router = Router()
 
@@ -74,7 +75,11 @@ async def process_broadcast_logic(message: Message, state: FSMContext):
             formatted_message = format_broadcast_message(messages[user_lang], user_id)
             
             try:
-                await message.bot.send_message(user_id, formatted_message, parse_mode='HTML')
+                # Добавляем кнопку "Главное меню" к рассылке
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
+                ])
+                await message.bot.send_message(user_id, formatted_message, parse_mode='HTML', reply_markup=keyboard)
                 stats[user_lang]["sent"] += 1
             except:
                 stats[user_lang]["failed"] += 1
@@ -98,7 +103,7 @@ async def process_broadcast_logic(message: Message, state: FSMContext):
     else:
         # Одноязычная рассылка
         broadcast_lang = data.get('broadcast_lang')
-        users = await db.fetchall("SELECT user_id FROM users")
+        users = await db.fetchall("SELECT user_id FROM users WHERE language_code = $1", broadcast_lang)
         
         sent = 0
         failed = 0
@@ -129,7 +134,11 @@ async def process_broadcast_logic(message: Message, state: FSMContext):
                 formatted_message = f"{headers[broadcast_lang]}\n\n{broadcast_text}{footers[broadcast_lang]}"
             
             try:
-                await message.bot.send_message(user_id, formatted_message, parse_mode='HTML')
+                # Добавляем кнопку "Главное меню" к рассылке
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
+                ])
+                await message.bot.send_message(user_id, formatted_message, parse_mode='HTML', reply_markup=keyboard)
                 sent += 1
             except Exception:
                 failed += 1
@@ -201,6 +210,12 @@ async def select_broadcast_mode(callback: CallbackQuery, state: FSMContext):
         )
         await state.set_state(CommunicationStates.waiting_broadcast_message)
         print(f"📢 DEBUG: State set to waiting_broadcast_message for user {callback.from_user.id}")
+
+@router.message(CommunicationStates.waiting_broadcast_message, admin_filter)
+async def process_single_lang_broadcast(message: Message, state: FSMContext):
+    """Обработка одноязычной рассылки"""
+    await process_broadcast_logic(message, state)
+    await state.clear()
 
 @router.message(CommunicationStates.waiting_broadcast_language, admin_filter)
 async def process_multilang_broadcast(message: Message, state: FSMContext):
